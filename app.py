@@ -223,7 +223,7 @@ if not st.session_state["autenticado"]:
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pendiente')
                         """, (reg_nombre.strip(), reg_user, hashear_password(reg_pass), reg_nacimiento.strftime("%Y-%m-%d"), reg_peso, reg_altura, reg_deporte, reg_obj))
                         conn.commit()
-                        st.success(f"🎉 ¡Registro enviado, {reg_nombre}! Quedó pendiente de aprobación.")
+                        st.success(f"🎉 ¡Registro enviado, {reg_nombre}! Quedó pendiente de aprobación por el Profe.")
                     except sqlite3.IntegrityError: st.error("❌ El usuario o nombre ya se encuentran registrados.")
     st.stop()
 
@@ -307,8 +307,18 @@ def renderizar_tabla_entrenamiento(nombre_atleta, es_espejo=False):
                             "ejercicio": nombre_ejercicio, "serie": s, "kilos": kilos_input, "reps_reales": reps_reales
                         }
                     
-                    notas_ejercicio = st.text_input("Comentarios:", placeholder="Ej: Liviano, molestia...", key=f"not_{sufijo}_{nombre_atleta}_{idx}_{dia_a_entrenar.replace(' ', '_')}")
-                    for s in range(1, series_prescritas + 1): entradas_alumno[(nombre_ejercicio, s)]["notas"] = notas_ejercicio
+                    # 🛠️ CORRECCIÓN DE KEY DUPLICADA: ID 100% Único por Ejercicio, Índice y Estructura temporal
+                    nombre_ej_limpio = nombre_ejercicio.replace(" ", "_").replace("[", "").replace("]", "").replace("-", "")
+                    dia_limpio = dia_a_entrenar.replace(" ", "_").replace("📅", "").replace("🏃", "")
+                    sub_b_limpio = sub_b.replace(" ", "_").replace("🔥", "").replace("⚡", "").replace("🧘", "")
+                    
+                    notas_ejercicio = st.text_input(
+                        "Comentarios:", 
+                        placeholder="Ej: Liviano, molestia...", 
+                        key=f"not_{sufijo}_{idx}_{nombre_ej_limpio}_{dia_limpio}_{sub_b_limpio}"
+                    )
+                    
+                    for s in range(1, series_prescritas + 1): entradas_alumno[(nombre_ejercicio, s)]["notes_field"] = notas_ejercicio
                     st.markdown("<hr style='margin: 12px 0px; opacity: 0.15;'/>", unsafe_allow_html=True)
                     
     if not ejercicios_visibles_en_pantalla:
@@ -339,7 +349,7 @@ def renderizar_tabla_entrenamiento(nombre_atleta, es_espejo=False):
                             INSERT INTO registros_entrenamiento 
                             (fecha, alumno, nombre_rutina, ejercicio, nro_serie, kilos, reps_reales, rpe_serie, notas, rpe_global_sesion, duracion_minutos) 
                             VALUES (?, ?, ?, ?, ?, ?, ?, 0.0, ?, ?, ?)
-                        """, (fecha_actual, nombre_atleta, nombre_reporte_dia, datos["ejercicio"], datos["serie"], datos["kilos"], datos["reps_reales"], datos["notas"], rpe_global, duracion_min))
+                        """, (fecha_actual, nombre_atleta, nombre_reporte_dia, datos["ejercicio"], datos["serie"], datos["kilos"], datos["reps_reales"], datos["notes_field"], rpe_global, duracion_min))
                     
                     cursor.execute("INSERT INTO asistencia (fecha, mes_ano, alumno) VALUES (?, ?, ?)", (fecha_hoy_texto, mes_ano_actual, nombre_atleta))
                     conn.commit()
@@ -358,7 +368,7 @@ if "mensaje_motivacional_pop" in st.session_state:
     del st.session_state["mensaje_motivacional_pop"]
 
 # ==========================================
-# 🚀 MONITOR ADMINISTRADOR (PROFE GIULIANO)
+# 🚀 PANTALLAS DEL ROL
 # ==========================================
 if st.session_state["rol_actual"] == "atleta":
     alumno_logueado = st.session_state["usuario_actual"]
@@ -388,10 +398,8 @@ elif st.session_state["rol_actual"] == "admin":
             ORDER BY COUNT(*) DESC
         """, conn, params=(mes_ano_actual,))
         
-        if df_asist_resumen.empty:
-            st.info("Ningún atleta registró asistencia todavía este mes.")
-        else:
-            st.dataframe(df_asist_resumen, use_container_width=True, hide_index=True)
+        if df_asist_resumen.empty: st.info("Ningún atleta registró asistencia todavía este mes.")
+        else: st.dataframe(df_asist_resumen, use_container_width=True, hide_index=True)
         st.divider()
         
         fecha_actual_hoy = datetime.now().strftime("%Y-%m-%d")
@@ -399,12 +407,11 @@ elif st.session_state["rol_actual"] == "admin":
         if not df_alertas.empty:
             st.markdown("#### ⚠️ SEMÁFORO DE ALERTAS CLÍNICAS (HOY)")
             for _, al_row in df_alertas.iterrows():
-                st.warning(f"🚨 **{al_row['alumno']}** reportó problemas en **{al_row['ejercicio']}**: *\"{al_row['notas']}\"*")
+                st.warning(f"🚨 **{al_row['alumno']}** reportó problemas en **{al_row['ejercicio']}**: *\"{al_row['notes_field'] if 'notes_field' in al_row else al_row['notas']}\"*")
             st.divider()
 
         alumno_a_revisar = st.selectbox("👤 Seleccionar Atleta para auditar series:", lista_alumnos_con_neutro, key="sb_hist_admin")
-        if alumno_a_revisar == "- Seleccionar Atleta -":
-            st.info("💡 Elegí un atleta para revisar el desglose específico de sus cargas.")
+        if alumno_a_revisar == "- Seleccionar Atleta -": st.info("💡 Elegí un atleta para revisar el desglose específico de sus cargas.")
         else:
             df_total_alumno = pd.read_sql_query("SELECT id, fecha, nombre_rutina, ejercicio, nro_serie, kilos, reps_reales, notas, rpe_global_sesion, duracion_minutos FROM registros_entrenamiento WHERE alumno = ? ORDER BY id DESC", conn, params=(alumno_a_revisar,))
             if df_total_alumno.empty: st.warning(f"Sin entrenamientos guardados para {alumno_a_revisar}.")
@@ -424,7 +431,6 @@ elif st.session_state["rol_actual"] == "admin":
                             conn.commit()
                             st.rerun()
 
-    # PESTAÑA DISEÑAR PLAN CON BORRADOR Y ENTRADA MANUAL CORREGIDA
     with tab_rutinas:
         st.markdown("### 📝 Pizarra de Planificación")
         alumno_rutina = st.selectbox("Planificar para:", lista_alumnos_con_neutro, key="planif_select_admin")
@@ -439,7 +445,6 @@ elif st.session_state["rol_actual"] == "admin":
             nombre_de_la_rutina = st.text_input("🏷️ Bloque / Nombre del Mesociclo (Ej: Planificación Julio - Fuerza):", value=valor_sugerido_nombre)
             
             st.divider()
-            
             col_p1, col_p2 = st.columns(2)
             with col_p1: dia_seleccionado = st.selectbox("1. ¿Qué día de la estructura semanal?:", options=DIAS_PLANIF)
             with col_p2: sub_bloque_seleccionado = st.selectbox("2. ¿En qué bloque de la sesión va?:", options=SUB_BLOQUES)
@@ -465,28 +470,22 @@ elif st.session_state["rol_actual"] == "admin":
                     cursor.execute("SELECT nombre FROM biblioteca_ejercicios ORDER BY nombre ASC")
                     
                 ejercicios_filtrados = [fila[0] for fila in cursor.fetchall()]
-                if ejercicios_filtrados:
-                    ejercicio_final = st.selectbox("Seleccionar Ejercicio:", ejercicios_filtrados)
-                else:
-                    ejercicio_final = st.text_input("No hay ejercicios en este patrón. Escribilo acá:")
+                if ejercicios_filtrados: ejercicio_final = st.selectbox("Seleccionar Ejercicio:", ejercicios_filtrados)
+                else: ejercicio_final = st.text_input("No hay ejercicios en este patrón. Escribilo acá:")
             else:
-                ejercicio_final = st.text_input("Escribí el ejercicio o trabajo aeróbico/libre:", placeholder="Ej: Pasadas 400m / Intervalado intermitente / Sentadilla Libre")
+                ejercicio_final = st.text_input("Escribí el ejercicio o trabajo aeróbico/libre:", placeholder="Ej: Pasadas 400m / Intervalado / Sentadilla Libre")
 
             col_r1, col_r2 = st.columns(2)
             with col_r1: series_obj = st.number_input("Series prescritas:", min_value=1, max_value=20, value=4)
             with col_r2: reps_obj = st.text_input("Repeticiones objetivo:", value="5")
                 
             if st.button("➕ Inyectar Ejercicio al Borrador", use_container_width=True):
-                if ejercicio_final.strip() == "" or nombre_de_la_rutina.strip() == "": 
-                    st.error("❌ Por favor completa el nombre de la rutina y el ejercicio.")
+                if ejercicio_final.strip() == "" or nombre_de_la_rutina.strip() == "": st.error("❌ Completa los campos obligatorios.")
                 else:
                     st.session_state["borrador_rutina"].append({
-                        "ejercicio": ejercicio_final.strip(),
-                        "bloque": llave_bloque_combinada,
-                        "series": int(series_obj),
-                        "reps": str(reps_obj)
+                        "ejercicio": ejercicio_final.strip(), "bloque": llave_bloque_combinada, "series": int(series_obj), "reps": str(reps_obj)
                     })
-                    st.toast(f"✅ Añadido al borrador: {ejercicio_final}")
+                    st.toast(f"✅ Añadido: {ejercicio_final}")
             
             if st.session_state["borrador_rutina"]:
                 st.markdown("### 📋 Pizarra Borrador (No Guardado Aún)")
@@ -507,14 +506,12 @@ elif st.session_state["rol_actual"] == "admin":
                                 INSERT INTO rutinas_asignadas (alumno, nombre_rutina, ejercicio, bloque, series_objetivo, reps_objetivo, fecha_asignacion) 
                                 VALUES (?, ?, ?, ?, ?, ?, ?)
                             """, (alumno_rutina, nombre_de_la_rutina.strip(), item["ejercicio"], item["bloque"], item["series"], item["reps"], fecha_hoy))
-                        
                         conn.commit()
                         st.session_state["borrador_rutina"] = []
-                        st.success(f"🎉 ¡Planificación publicada con éxito! El atleta **{alumno_rutina}** ya puede visualizarla.")
+                        st.success(f"🎉 ¡Planificación publicada con éxito para **{alumno_rutina}**!")
                         st.rerun()
             
             st.divider()
-            
             cursor.execute("SELECT id, ejercicio, bloque, series_objetivo, reps_objetivo FROM rutinas_asignadas WHERE alumno = ?", (alumno_rutina,))
             ejercicios_actuales = cursor.fetchall()
             if ejercicios_actuales:
@@ -534,7 +531,6 @@ elif st.session_state["rol_actual"] == "admin":
                     conn.commit()
                     st.rerun()
 
-    # PESTAÑA CLONAR
     with tab_clonar:
         st.markdown("### 👥 Clonación Semanal de Pizarras")
         col_c1, col_c2 = st.columns(2)
@@ -553,7 +549,6 @@ elif st.session_state["rol_actual"] == "admin":
                     st.success("🎉 ¡Pizarra copiada completa!")
                     st.rerun()
 
-    # PESTAÑA FICHAS CLÍNICAS
     with tab_fichas:
         st.markdown("### 📋 Fichas Clínicas")
         cursor.execute("SELECT nombre_apellido, usuario, fecha_nacimiento, peso, altura, deporte, objetivo FROM alumnos WHERE estado = 'aprobado' ORDER BY nombre_apellido ASC")
@@ -573,7 +568,6 @@ elif st.session_state["rol_actual"] == "admin":
                             conn.commit()
                             st.rerun()
 
-    # PESTAÑA SOLICITUDES
     with tab_aprobaciones:
         st.markdown("### 👥 Solicitudes de Autoregistro Pendientes")
         cursor.execute("SELECT id, nombre_apellido, usuario, deporte, objetivo FROM alumnos WHERE estado = 'pendiente' ORDER BY id ASC")
@@ -596,7 +590,7 @@ elif st.session_state["rol_actual"] == "admin":
                             conn.commit()
                             st.rerun()
 
-    # PESTAÑA EXCEL (CORREGIDA CON grupo_muscular)
+    # 📚 EXCEL CON OBSERVACIÓN INLINE DE LA COLUMNA grupo_muscular
     with tab_excel:
         st.markdown("### 📚 Importar Biblioteca de Ejercicios (.xlsx / .csv)")
         archivo_subido = st.file_uploader("Arrastrá tu archivo excel o csv con los ejercicios:", type=["xlsx", "csv"])
@@ -611,30 +605,22 @@ elif st.session_state["rol_actual"] == "admin":
                 col_grupo = next((c for c in columnas_actuales if c.lower() in ["grupo", "grupo muscular", "grupo_muscular", "musculo", "target", "patron"]), None)
                 col_video = next((c for c in columnas_actuales if c.lower() in ["video", "link", "url", "link_video"]), None)
                 
-                if not col_nombre:
-                    st.error("❌ El archivo debe tener al menos una columna llamada 'nombre' o 'ejercicio'.")
+                if not col_nombre: st.error("❌ El archivo debe tener una columna llamada 'nombre' o 'ejercicio'.")
                 else:
-                    st.success(f"📋 Archivo detectado con éxito. Se encontraron {len(df_ejercicios)} filas.")
+                    st.success(f"📋 Archivo detectado. Filas: {len(df_ejercicios)}")
                     st.dataframe(df_ejercicios.head(10), use_container_width=True)
                     
                     if st.button("📥 CONFIRMAR E INYECTAR A LA BIBLIOTECA", use_container_width=True, type="primary"):
                         contador_insertados = 0
                         for _, fila in df_ejercicios.iterrows():
                             n_val = str(fila[col_nombre]).strip()
-                            if n_val == "" or n_val.lower() == "nan": 
-                                continue
+                            if n_val == "" or n_val.lower() == "nan": continue
                             g_val = str(fila[col_grupo]).strip() if (col_grupo and str(fila[col_grupo]).strip().lower() != "nan") else "General"
                             v_val = str(fila[col_video]).strip() if (col_video and str(fila[col_video]).strip().lower() != "nan") else ""
                             
-                            cursor.execute("""
-                                INSERT OR IGNORE INTO biblioteca_ejercicios (nombre, grupo_muscular, link_video) 
-                                VALUES (?, ?, ?)
-                            """, (n_val, g_val, v_val))
+                            cursor.execute("INSERT OR IGNORE INTO biblioteca_ejercicios (nombre, grupo_muscular, link_video) VALUES (?, ?, ?)", (n_val, g_val, v_val))
                             contador_insertados += 1
-                            
                         conn.commit()
-                        st.success(f"🎉 ¡Biblioteca actualizada! Se procesaron {contador_insertados} ejercicios correctamente.")
+                        st.success(f"🎉 ¡Procesados {contador_insertados} ejercicios correctamente!")
                         st.rerun()
-                        
-            except Exception as e: 
-                st.error(f"❌ Ocurrió un error al procesar el archivo: {e}")
+            except Exception as e: st.error(f"❌ Error al procesar archivo: {e}")
