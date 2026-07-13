@@ -2,6 +2,7 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 import bcrypt
+import random
 from datetime import datetime, date
 
 # ==========================================
@@ -17,7 +18,7 @@ def verificar_password(password_ingresada: str, hash_guardado: str) -> bool:
         return password_ingresada == hash_guardado
 
 # ==========================================
-# 🛠️ HELPER: CÁLCULO DINÁMICO DE EDAD
+# 🛠️ HELPERS: CÁLCULO DE EDAD Y MOTIVACIÓN
 # ==========================================
 def calcular_edad(fecha_nac_str):
     try:
@@ -29,17 +30,38 @@ def calcular_edad(fecha_nac_str):
     except Exception:
         return 0
 
+def obtener_frase_motivacional(dias_acumulados):
+    frases_inicio = [
+        "¡Excelente primer paso! El camino hacia tus objetivos empieza hoy. 🚀",
+        "¡Buen comienzo! La constancia es el secreto del rendimiento. 💪"
+    ]
+    frases_racha_baja = [
+        f"¡Suma y sigue! Ya van {dias_acumulados} entrenamientos este mes. ¡Buen ritmo! ⚡",
+        f"¡Cuerpo y mente enfocados! Llevás {dias_acumulados} sesiones. No aflojes. 🔥"
+    ]
+    frases_racha_media = [
+        f"¡Tremenda disciplina! {dias_acumulados} días adentro. Te estás volviendo imparable. 👑",
+        f"El esfuerzo de hoy es el rendimiento del mañana. ¡{dias_acumulados} sesiones acumuladas! 🏆"
+    ]
+    frases_elite = [
+        f"¡Nivel Élite! 🔥 {dias_acumulados} entrenamientos en el mes. Sos un ejemplo de consistencia. 🦅",
+        f"¡Impresionante! {dias_acumulados} días dándolo todo. La preparación vence al talento. 🥇"
+    ]
+    
+    if dias_acumulados <= 1:
+        return random.choice(frases_inicio)
+    elif dias_acumulados <= 5:
+        return random.choice(frases_racha_baja)
+    elif dias_acumulados <= 12:
+        return random.choice(frases_racha_media)
+    else:
+        return random.choice(frases_elite)
+
 # ==========================================
 # 0. CONSTANTES GLOBALES
 # ==========================================
-BLOQUES = [
-    "🔥 Entrada en Calor", 
-    "⚡ Bloque Principal", 
-    "🧘 Bloque Final / Vuelta a la Calma",
-    "📅 Día 1",
-    "📅 Día 2",
-    "🏃 Día Aeróbico"
-]
+DIAS_PLANIF = ["📅 Día 1", "📅 Día 2", "🏃 Día Aeróbico"]
+SUB_BLOQUES = ["🔥 Entrada en Calor", "⚡ Bloque Principal", "🧘 Bloque Final / Vuelta a la Calma"]
 
 try:
     ADMIN_USER = st.secrets["admin_user"]
@@ -62,7 +84,6 @@ def get_connection():
 conn = get_connection()
 cursor = conn.cursor()
 
-# Tabla de alumnos con columna 'estado' para aprobación
 cursor.execute("""
     CREATE TABLE IF NOT EXISTS alumnos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -113,6 +134,15 @@ cursor.execute("""
         duracion_minutos INTEGER
     )
 """)
+# NUEVA TABLA CRÍTICA: Asistencia integrada
+cursor.execute("""
+    CREATE TABLE IF NOT EXISTS asistencia (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        fecha TEXT,
+        mes_ano TEXT,
+        alumno TEXT
+    )
+""")
 conn.commit()
 
 # ==========================================
@@ -125,7 +155,7 @@ st.markdown("<p style='text-align: center; color: #84CC16; font-weight: bold; le
 st.divider()
 
 # ==========================================
-# 🔑 AUTENTICACIÓN Y AUTOREGISTRO CON FILTRO
+# 🔑 LOGIN Y AUTOREGISTRO
 # ==========================================
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
@@ -133,7 +163,7 @@ if "autenticado" not in st.session_state:
     st.session_state["rol_actual"] = ""
 
 if not st.session_state["autenticado"]:
-    login_mode = st.radio("Seleccioná una opción:", ["🔑 Iniciar Sesión", "👥 ¿Sos nuevo? Registrate acá 👤"], horizontal=True, label_visibility="collapsed")
+    login_mode = st.radio("Opción:", ["🔑 Iniciar Sesión", "👥 ¿Sos nuevo? Registrate acá 👤"], horizontal=True, label_visibility="collapsed")
     
     if login_mode == "🔑 Iniciar Sesión":
         st.markdown("<h3 style='text-align: center;'>🔐 Iniciar Sesión</h3>", unsafe_allow_html=True)
@@ -159,7 +189,7 @@ if not st.session_state["autenticado"]:
                     user_db = cursor.fetchone()
                     if user_db and verificar_password(input_pass, user_db[1]):
                         if user_db[2] == "pendiente":
-                            st.warning("⏳ Tu cuenta fue registrada pero aún está pendiente de aprobación por el Prof. Giuliano. Te avisamos apenas se habilite.")
+                            st.warning("⏳ Tu cuenta está pendiente de aprobación por el Prof. Giuliano.")
                         else:
                             st.session_state["autenticado"] = True
                             st.session_state["usuario_actual"] = user_db[0]
@@ -187,30 +217,37 @@ if not st.session_state["autenticado"]:
                 else:
                     try:
                         cursor.execute("""
-                            INSERT INTO alumnos (nombre_apellido, usuario, contrasena, fecha_nacimiento, peso, altura, deporte, objetivo, estado) 
+                            INSERT INTO alumnos (nombre_apellido, usuario, contrasena, fecha_nacimiento, peso, altura, deporte, objective, estado) 
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pendiente')
                         """, (reg_nombre.strip(), reg_user, hashear_password(reg_pass), reg_nacimiento.strftime("%Y-%m-%d"), reg_peso, reg_altura, reg_deporte, reg_obj))
                         conn.commit()
-                        st.success(f"🎉 ¡Registro enviado, {reg_nombre}! Quedó pendiente de aprobación por el Profe.")
-                    except sqlite3.IntegrityError:
-                        st.error("❌ El usuario o nombre ya se encuentran registrados.")
+                        st.success(f"🎉 ¡Registro enviado, {reg_nombre}! Quedó pendiente de aprobación.")
+                    except sqlite3.IntegrityError: st.error("❌ El usuario o nombre ya se encuentran registrados.")
     st.stop()
 
 st.sidebar.markdown(f"👤 Conectado: **{st.session_state['usuario_actual']}**")
+
+# Mostrar racha mensual inline en el menú lateral si es atleta
+if st.session_state["rol_actual"] == "atleta":
+    mes_actual_str = datetime.now().strftime("%m-%Y")
+    cursor.execute("SELECT COUNT(*) FROM asistencia WHERE alumno = ? AND mes_ano = ?", (st.session_state["usuario_actual"], mes_actual_str))
+    racha_act = cursor.fetchone()[0]
+    st.sidebar.markdown(f"📆 Asistencias este mes: **{racha_act}**")
+
 if st.sidebar.button("🔒 Cerrar Sesión"):
     st.session_state["autenticado"] = False
     st.rerun()
 
-# Filtrar solo aprobados para el uso regular
 cursor.execute("SELECT nombre_apellido FROM alumnos WHERE estado = 'aprobado' ORDER BY nombre_apellido ASC")
 lista_alumnos = [fila[0] for fila in cursor.fetchall()]
 lista_alumnos_con_neutro = ["- Seleccionar Atleta -"] + lista_alumnos
 
 # ==========================================
-# 📱 INTERFAZ ATLETA EN TRINCHERA (SIN RPE INDIVIDUAL)
+# 📱 INTERFAZ ATLETA CON ASISTENCIA Y MOTIVACIÓN
 # ==========================================
 def renderizar_tabla_entrenamiento(nombre_atleta, es_espejo=False):
     sufijo = "esp" if es_espejo else "atl"
+    
     cursor.execute("""
         SELECT r.ejercicio, r.bloque, r.series_objetivo, r.reps_objetivo, b.link_video, r.nombre_rutina 
         FROM rutinas_asignadas r
@@ -220,19 +257,27 @@ def renderizar_tabla_entrenamiento(nombre_atleta, es_espejo=False):
     rutina_completa = cursor.fetchall()
     
     if not rutina_completa:
-        st.info("No hay ejercicios asignados para hoy.")
+        st.info("No tenés ninguna rutina asignada para este mes todavía.")
         return
         
-    nombre_de_la_rutina = rutina_completa[0][5] or "Rutina General"
-    if es_espejo: st.warning(f"👀 MODO ESPEJO. Plan: **{nombre_de_la_rutina}**")
-    else: st.markdown(f"### 📋 Plan Activo: <span style='color: #CCFF00;'>{nombre_de_la_rutina}</span>", unsafe_allow_html=True)
+    nombre_de_la_rutina = rutina_completa[0][5] or "Planificación Mensual"
+    if es_espejo: st.warning(f"👀 MODO ESPEJO. Planificación: **{nombre_de_la_rutina}**")
+    else: st.markdown(f"### 📋 Plan Mensual: <span style='color: #CCFF00;'>{nombre_de_la_rutina}</span>", unsafe_allow_html=True)
+    
+    st.markdown("---")
+    dia_a_entrenar = st.selectbox("📆 ¿Qué día te toca entrenar hoy?", options=DIAS_PLANIF, key=f"sb_dia_atleta_{sufijo}")
+    st.markdown("---")
 
     entradas_alumno = {}
+    ejercicios_visibles_en_pantalla = False
     
-    for key_bloque in BLOQUES:
-        ejercicios_del_bloque = [r for r in rutina_completa if r[1] == key_bloque]
+    for sub_b in SUB_BLOQUES:
+        llave_busqueda = f"{dia_a_entrenar}|{sub_b}"
+        ejercicios_del_bloque = [r for r in rutina_completa if r[1] == llave_busqueda]
+        
         if ejercicios_del_bloque:
-            st.markdown(f"<h4 style='color: #CCFF00; margin-top: 20px; background-color: #1E293B; padding: 6px 10px; border-radius: 4px;'>{key_bloque}</h4>", unsafe_allow_html=True)
+            ejercicios_visibles_en_pantalla = True
+            st.markdown(f"<h4 style='color: #CCFF00; margin-top: 20px; background-color: #1E293B; padding: 6px 10px; border-radius: 4px;'>{sub_b}</h4>", unsafe_allow_html=True)
             
             for idx, ej in enumerate(ejercicios_del_bloque):
                 nombre_ejercicio = ej[0]
@@ -242,12 +287,10 @@ def renderizar_tabla_entrenamiento(nombre_atleta, es_espejo=False):
                 
                 with st.container():
                     col_t1, col_t2 = st.columns([3, 1])
-                    with col_t1:
-                        st.markdown(f"💪 **{nombre_ejercicio}** | `{series_prescritas}S x {reps_prescritas}R`")
-                    with col_t2:
+                    with col_t1: st.markdown(f"💪 **{nombre_ejercicio}** | `{series_prescritas}S x {reps_prescritas}R`")
+                    with col_t2: 
                         if link_video and "http" in link_video: st.markdown(f"[🎥 Video]({link_video})")
                     
-                    # Carga limpia: Reps y Kilos únicamente (Kilos arrancan en 0.0)
                     for s in range(1, series_prescritas + 1):
                         key_id = f"{sufijo}_{nombre_atleta}_{idx}_{nombre_ejercicio.replace(' ', '_')}_s{s}"
                         col_s1, col_s2, col_s3 = st.columns([1, 2, 2])
@@ -255,46 +298,70 @@ def renderizar_tabla_entrenamiento(nombre_atleta, es_espejo=False):
                         with col_s2:
                             try: default_reps = int(reps_prescritas)
                             except: default_reps = 5
-                            reps_reales = st.number_input("Reps logradas:", min_value=0, max_value=100, value=default_reps, key=f"rep_{key_id}")
-                        with col_s3: 
-                            kilos_input = st.number_input("Kilos usados:", min_value=0.0, step=0.5, value=0.0, key=f"k_{key_id}")
+                            reps_reales = st.number_input("Reps:", min_value=0, max_value=100, value=default_reps, key=f"rep_{key_id}")
+                        with col_s3: kilos_input = st.number_input("Kilos:", min_value=0.0, step=0.5, value=0.0, key=f"k_{key_id}")
                         
                         entradas_alumno[(nombre_ejercicio, s)] = {
-                            "ejercicio": nombre_ejercicio, "serie": s, "kilos": kilos_input, "reps_reales": reps_reales, "rpe_serie": 0.0
+                            "ejercicio": nombre_ejercicio, "serie": s, "kilos": kilos_input, "reps_reales": reps_reales
                         }
                     
-                    notas_ejercicio = st.text_input("Sensaciones del ejercicio:", placeholder="Ej: Molestia leve, volé, etc.", key=f"not_{sufijo}_{nombre_atleta}_{idx}")
+                    notas_ejercicio = st.text_input("Comentarios:", placeholder="Ej: Liviano, molestia...", key=f"not_{sufijo}_{nombre_atleta}_{idx}_{dia_a_entrenar.replace(' ', '_')}")
                     for s in range(1, series_prescritas + 1): entradas_alumno[(nombre_ejercicio, s)]["notas"] = notas_ejercicio
                     st.markdown("<hr style='margin: 12px 0px; opacity: 0.15;'/>", unsafe_allow_html=True)
-    
+                    
+    if not ejercicios_visibles_en_pantalla:
+        st.info(f"No tenés ejercicios cargados en el sistema para el día: **{dia_a_entrenar}**.")
+        return
+        
     st.markdown("<h4 style='color: #84CC16; margin-top: 30px;'>📊 Evaluación General de la Sesión</h4>", unsafe_allow_html=True)
     col_g1, col_g2 = st.columns(2)
     with col_g1: rpe_global = st.select_slider("¿Qué tan dura estuvo la sesión hoy? (RPE Global):", options=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10], value=7)
     with col_g2: duracion_min = st.number_input("⏱️ ¿Cuántos minutos duró el entrenamiento?", min_value=1, max_value=300, value=60, step=5)
 
-    if st.button("🏁 FINALIZAR ENTRENAMIENTO Y ENVIAR", use_container_width=True, type="primary", key=f"btn_finalizar_{sufijo}"):
+    if st.button("🏁 FINALIZAR ENTRENAMIENTO Y ENVIAR AL PROFE", use_container_width=True, type="primary", key=f"btn_finalizar_{sufijo}"):
         if es_espejo: st.info("ℹ️ Modo espejo de visualización.")
         else:
             fecha_hoy_texto = datetime.now().strftime("%Y-%m-%d")
             cursor.execute("SELECT COUNT(*) FROM registros_entrenamiento WHERE alumno = ? AND fecha LIKE ?", (nombre_atleta, f"{fecha_hoy_texto}%"))
-            if cursor.fetchone()[0] > 0: st.error(f"⚠️ Ya registraste tu sesión de hoy.")
+            if cursor.fetchone()[0] > 0: st.error(f"⚠️ Ya registraste una sesión hoy.")
             else:
                 datos_validos = [d for d in entradas_alumno.values() if d["kilos"] > 0 or d["reps_reales"] > 0]
-                if not datos_validos: st.warning("⚠️ Completá las marcas antes de finalizar.")
+                if not datos_validos: st.warning("⚠️ Completá marcas antes de guardar.")
                 else:
                     fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M")
+                    mes_ano_actual = datetime.now().strftime("%m-%Y")
+                    nombre_reporte_dia = f"{nombre_de_la_rutina} ({dia_a_entrenar})"
+                    
+                    # 1. Guardar marcas reales
                     for datos in datos_validos:
                         cursor.execute("""
                             INSERT INTO registros_entrenamiento 
                             (fecha, alumno, nombre_rutina, ejercicio, nro_serie, kilos, reps_reales, rpe_serie, notas, rpe_global_sesion, duracion_minutos) 
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (fecha_actual, nombre_atleta, nombre_de_la_rutina, datos["ejercicio"], datos["serie"], datos["kilos"], datos["reps_reales"], datos["rpe_serie"], datos["notas"], rpe_global, duracion_min))
+                            VALUES (?, ?, ?, ?, ?, ?, ?, 0.0, ?, ?, ?)
+                        """, (fecha_actual, nombre_atleta, nombre_reporte_dia, datos["ejercicio"], datos["serie"], datos["kilos"], datos["reps_reales"], datos["notas"], rpe_global, duracion_min))
+                    
+                    # 2. Registrar Asistencia Automática del Día
+                    cursor.execute("INSERT INTO asistencia (fecha, mes_ano, alumno) VALUES (?, ?, ?)", (fecha_hoy_texto, mes_ano_actual, nombre_atleta))
                     conn.commit()
-                    st.success("🚀 ¡Entrenamiento enviado con éxito!")
+                    
+                    # 3. Calcular racha para el mensaje motivador dinámico
+                    cursor.execute("SELECT COUNT(*) FROM asistencia WHERE alumno = ? AND mes_ano = ?", (nombre_atleta, mes_ano_actual))
+                    total_dias = cursor.fetchone()[0]
+                    
+                    # Guardamos el mensaje en session_state para mostrarlo tras recargar
+                    st.session_state["mensaje_motivacional_pop"] = obtener_frase_motivacional(total_dias)
+                    st.success("🚀 ¡Entrenamiento enviado correctamente a Mag Power!")
                     st.rerun()
 
+# Mostrar mensaje si existe en memoria flotante
+if "mensaje_motivacional_pop" in st.session_state:
+    st.balloons()
+    st.toast(st.session_state["mensaje_motivacional_pop"], icon="🏆")
+    st.markdown(f"<div style='background-color: #1E293B; border-left: 5px solid #84CC16; padding: 15px; border-radius: 4px; margin-bottom: 20px;'><strong>🏅 MENSAJE DEL PROFE GIULIANO:</strong><br/>{st.session_state['mensaje_motivacional_pop']}</div>", unsafe_allow_html=True)
+    del st.session_state["mensaje_motivacional_pop"]
+
 # ==========================================
-# 🚀 PANTALLAS SEGÚN ROL
+# 🚀 PANTALLAS SEGÚN ROL ADMINISTRADOR
 # ==========================================
 if st.session_state["rol_actual"] == "atleta":
     alumno_logueado = st.session_state["usuario_actual"]
@@ -304,32 +371,48 @@ if st.session_state["rol_actual"] == "atleta":
     with tab_progreso:
         df_hist_atleta = pd.read_sql_query("SELECT fecha, nombre_rutina, ejercicio, nro_serie, kilos, reps_reales, notas FROM registros_entrenamiento WHERE alumno = ? ORDER BY id DESC", conn, params=(alumno_logueado,))
         if df_hist_atleta.empty: st.info("Aún no registrás entrenamientos.")
-        else: st.dataframe(df_hist_atleta.rename(columns={"nombre_rutina": "Plan", "fecha":"Fecha", "ejercicio":"Ejercicio", "nro_serie":"Serie", "kilos":"Kilos", "reps_reales":"Reps", "notas":"Notas"}), use_container_width=True, hide_index=True)
+        else: st.dataframe(df_hist_atleta.rename(columns={"nombre_rutina": "Plan / Día", "fecha":"Fecha", "ejercicio":"Ejercicio", "nro_serie":"Serie", "kilos":"Kilos", "reps_reales":"Reps", "notas":"Notes"}), use_container_width=True, hide_index=True)
 
 elif st.session_state["rol_actual"] == "admin":
     tab_dashboard, tab_rutinas, tab_clonar, tab_fichas, tab_aprobaciones, tab_excel = st.tabs([
         "📊 Historial", "📝 Diseñar Plan", "👥 Clonar Pizarra", "📋 Fichas Clínicas", "👥 Aprobar Atletas", "📚 Biblioteca"
     ])
     
-    # 📊 MONITOR INTELIGENTE (CON SEMÁFORO DE ALERTAS CLÍNICAS)
+    # 📊 MONITOR HISTORIAL (CON CONTROL DE ASISTENCIA INTEGRADO)
     with tab_dashboard:
-        st.markdown("### 🔍 Monitor General de Rendimiento")
+        st.markdown("### 🔍 Monitor General y Control de Asistencia")
         
-        # Sistema de escaneo preventivo automático de palabras clave de dolor
+        # 📆 NUEVO SUBPANEL: Tablero de asistencia rápida de tus atletas
+        mes_ano_actual = datetime.now().strftime("%m-%Y")
+        st.markdown(f"#### 📅 Control de Asistencia Mensual ({mes_ano_actual})")
+        df_asist_resumen = pd.read_sql_query("""
+            SELECT alumno as 'Atleta', COUNT(*) as 'Días Entrenados' 
+            FROM asistencia 
+            WHERE mes_ano = ? 
+            GROUP BY alumno 
+            ORDER BY COUNT(*) DESC
+        """, conn, params=(mes_ano_actual,))
+        
+        if df_asist_resumen.empty:
+            st.info("Ningún atleta registró asistencia todavía este mes.")
+        else:
+            st.dataframe(df_asist_resumen, use_container_width=True, hide_index=True)
+        st.divider()
+        
+        # Semáforo clínico de dolores de hoy
         fecha_actual_hoy = datetime.now().strftime("%Y-%m-%d")
         df_alertas = pd.read_sql_query("SELECT alumno, ejercicio, notas FROM registros_entrenamiento WHERE fecha LIKE ? AND (notas LIKE '%dolor%' OR notas LIKE '%molestia%' OR notas LIKE '%tiron%' OR notas LIKE '%molesto%')", conn, params=(f"{fecha_actual_hoy}%",))
-        
         if not df_alertas.empty:
             st.markdown("#### ⚠️ SEMÁFORO DE ALERTAS CLÍNICAS (HOY)")
             for _, al_row in df_alertas.iterrows():
                 st.warning(f"🚨 **{al_row['alumno']}** reportó problemas en **{al_row['ejercicio']}**: *\"{al_row['notas']}\"*")
             st.divider()
 
-        alumno_a_revisar = st.selectbox("👤 Seleccionar Atleta para auditar:", lista_alumnos_con_neutro, key="sb_hist_admin")
+        alumno_a_revisar = st.selectbox("👤 Seleccionar Atleta para auditar series:", lista_alumnos_con_neutro, key="sb_hist_admin")
         if alumno_a_revisar == "- Seleccionar Atleta -":
-            st.info("💡 Elegí un atleta para auditar el desglose de sus series reales.")
+            st.info("💡 Elegí un atleta para revisar el desglose específico de sus cargas.")
         else:
-            df_total_alumno = pd.read_sql_query("SELECT fecha, nombre_rutina, ejercicio, nro_serie, kilos, reps_reales, notas, rpe_global_sesion, duracion_minutos FROM registros_entrenamiento WHERE alumno = ? ORDER BY id DESC", conn, params=(alumno_a_revisar,))
+            df_total_alumno = pd.read_sql_query("SELECT id, fecha, nombre_rutina, ejercicio, nro_serie, kilos, reps_reales, notas, rpe_global_sesion, duracion_minutos FROM registros_entrenamiento WHERE alumno = ? ORDER BY id DESC", conn, params=(alumno_a_revisar,))
             if df_total_alumno.empty: st.warning(f"Sin entrenamientos guardados para {alumno_a_revisar}.")
             else:
                 for fecha_sesion in df_total_alumno["fecha"].unique():
@@ -339,44 +422,56 @@ elif st.session_state["rol_actual"] == "admin":
                     dur_m = df_sesion_especifica.iloc[0]["duracion_minutos"] or 60
                     
                     with st.expander(f"🏋️‍♂️ {r_name} — {fecha_sesion} | 📊 sRPE Carga: {int(rpe_g)*int(dur_m)} (RPE {rpe_g} x {dur_m} min)"):
-                        st.dataframe(df_sesion_especifica[["ejercicio", "nro_serie", "kilos", "reps_reales", "notas"]].rename(columns={"ejercicio": "Ejercicio", "nro_serie": "Serie", "kilos": "Kilos Anotados", "reps_reales": "Reps Reales", "notas": "Notas Atleta"}), use_container_width=True, hide_index=True)
+                        st.dataframe(df_sesion_especifica[["ejercicio", "nro_serie", "kilos", "reps_reales", "notas"]].rename(columns={"ejercicio": "Ejercicio", "nro_serie": "Serie", "kilos": "Kilos", "reps_reales": "Reps Reales", "notas": "Notas Atleta"}), use_container_width=True, hide_index=True)
                         if st.button("🗑️ Eliminar Sesión", key=f"del_{fecha_sesion.replace(' ', '_').replace(':', '_')}"):
+                            # Al borrar el entrenamiento, removemos la marca del registro y de la asistencia de ese día
+                            solo_fecha_dia = fecha_sesion.split(" ")[0]
                             cursor.execute("DELETE FROM registros_entrenamiento WHERE alumno = ? AND fecha = ?", (alumno_a_revisar, fecha_sesion))
+                            cursor.execute("DELETE FROM asistencia WHERE alumno = ? AND fecha = ?", (alumno_a_revisar, solo_fecha_dia))
                             conn.commit()
                             st.rerun()
 
-    # 📝 DISEÑAR PLAN CON VALIDACIÓN DE DUPLICADOS
+    # 📝 DISEÑAR PLAN
     with tab_rutinas:
-        st.markdown("### 📝 Diseñar Planificación Semanal")
+        st.markdown("### 📝 Diseñar Planificación por Estructura Semanal")
         alumno_rutina = st.selectbox("Planificar para:", lista_alumnos_con_neutro, key="planif_select_admin")
         
-        if alumno_rutina == "- Seleccionar Atleta -": st.info("Elegí un atleta para configurar su pizarra.")
+        if alumno_rutina == "- Seleccionar Atleta -": st.info("💡 Elegí un atleta de la lista para empezar.")
         else:
             cursor.execute("SELECT nombre_rutina FROM rutinas_asignadas WHERE alumno = ? LIMIT 1", (alumno_rutina,))
             rutina_existente = cursor.fetchone()
             valor_sugerido_nombre = rutina_existente[0] if (rutina_existente and rutina_existente[0]) else ""
-            nombre_de_la_rutina = st.text_input("🏷️ Nombre de la Planificación (Único):", value=valor_sugerido_nombre)
+            nombre_de_la_rutina = st.text_input("🏷️ Header / Nombre de la Planificación Mensual:", value=valor_sugerido_nombre)
             
             nombre_duplicado = False
             if nombre_de_la_rutina.strip() != "":
                 cursor.execute("SELECT COUNT(*) FROM rutinas_asignadas WHERE nombre_rutina = ? AND alumno != ?", (nombre_de_la_rutina.strip(), alumno_rutina))
                 if cursor.fetchone()[0] > 0:
-                    st.error("⚠️ Nombre en uso por otro atleta. Modificalo para evitar solapamientos.")
+                    st.error("⚠️ Este nombre de plan ya está asignado a otro atleta.")
                     nombre_duplicado = True
+
+            st.divider()
+            col_p1, col_p2 = st.columns(2)
+            with col_p1: dia_seleccionado = st.selectbox("1. ¿A qué DÍA de la semana pertenece este ejercicio?:", options=DIAS_PLANIF)
+            with col_p2: sub_bloque_seleccionado = st.selectbox("2. ¿En qué PARTE de la sesión va?:", options=SUB_BLOQUES)
+            
+            llave_bloque_combinada = f"{dia_seleccionado}|{sub_bloque_seleccionado}"
 
             cursor.execute("SELECT nombre FROM biblioteca_ejercicios ORDER BY nombre ASC")
             ejercicios_db = [fila[0] for fila in cursor.fetchall()]
-            ejercicio_rutina = st.selectbox("Seleccionar Ejercicio:", ejercicios_db) if ejercicios_db else st.text_input("Ejercicio manual:")
-            bloque_seleccionado = st.selectbox("Asignar al Bloque o Día:", BLOQUES)
+            ejercicio_rutina = st.selectbox("3. Seleccionar Ejercicio:", ejercicios_db) if ejercicios_db else st.text_input("Ejercicio manual:")
             
             col_r1, col_r2 = st.columns(2)
-            with col_r1: series_obj = st.number_input("Series:", min_value=1, max_value=20, value=4)
-            with col_r2: reps_obj = st.text_input("Repeticiones sugeridas:", value="5")
+            with col_r1: series_obj = st.number_input("Series prescritas:", min_value=1, max_value=20, value=4)
+            with col_r2: reps_obj = st.text_input("Repeticiones objetivo:", value="5")
                 
-            if st.button("🚀 Inyectar Ejercicio a la Pizarra", use_container_width=True, disabled=nombre_duplicado):
-                if ejercicio_rutina == "" or nombre_de_la_rutina.strip() == "": st.error("Faltan campos obligatorios.")
+            if st.button("🚀 Inyectar Ejercicio al Plan", use_container_width=True, disabled=nombre_duplicado):
+                if ejercicio_rutina == "" or nombre_de_la_rutina.strip() == "": st.error("Completá los campos.")
                 else:
-                    cursor.execute("INSERT INTO rutinas_asignadas (alumno, nombre_rutina, ejercicio, bloque, series_objetivo, reps_objetivo, fecha_asignacion) VALUES (?, ?, ?, ?, ?, ?, ?)", (alumno_rutina, nombre_de_la_rutina.strip(), ejercicio_rutina, bloque_seleccionado, int(series_obj), reps_obj, datetime.now().strftime("%Y-%m-%d")))
+                    cursor.execute("""
+                        INSERT INTO rutinas_asignadas (alumno, nombre_rutina, ejercicio, bloque, series_objetivo, reps_objetivo, fecha_asignacion) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, (alumno_rutina, nombre_de_la_rutina.strip(), ejercicio_rutina, llave_bloque_combinada, int(series_obj), reps_obj, datetime.now().strftime("%Y-%m-%d")))
                     conn.commit()
                     st.rerun()
                     
@@ -384,128 +479,80 @@ elif st.session_state["rol_actual"] == "admin":
             cursor.execute("SELECT id, ejercicio, bloque, series_objetivo, reps_objetivo FROM rutinas_asignadas WHERE alumno = ?", (alumno_rutina,))
             ejercicios_actuales = cursor.fetchall()
             if ejercicios_actuales:
-                for b_tit in BLOQUES:
-                    items_b = [e for e in ejercicios_actuales if e[2] == b_tit]
-                    if items_b:
-                        st.markdown(f"**{b_tit}**")
-                        for item in items_b: st.write(f" └─ {item[1]} ({item[3]}x{item[4]})")
+                st.markdown(f"#### 📅 Mapa de Trabajo Actual")
+                for d_op in DIAS_PLANIF:
+                    ejercicios_del_dia = [e for e in ejercicios_actuales if e[2].startswith(d_op)]
+                    if ejercicios_del_dia:
+                        st.markdown(f"<h5 style='color: #84CC16; margin-top: 10px;'>{d_op}</h5>", unsafe_allow_html=True)
+                        for sb_op in SUB_BLOQUES:
+                            llave_comp = f"{d_op}|{sb_op}"
+                            items_b = [e for e in ejercicios_del_dia if e[2] == llave_comp]
+                            if items_b:
+                                st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;**{sb_op}**")
+                                for item in items_b: st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└─ {item[1]} ({item[3]}x{item[4]})")
                 if st.button("🗑️ Vaciar Plan"):
                     cursor.execute("DELETE FROM rutinas_asignadas WHERE alumno = ?", (alumno_rutina,))
                     conn.commit()
                     st.rerun()
 
-    # 👥 NUEVO MÓDULO: CLONACIÓN EN UN SOLO CLIC
+    # 👥 CLONACIÓN
     with tab_clonar:
-        st.markdown("### 👥 Clonación y Copia de Pizarras Semanales")
-        st.caption("Copia la rutina base completa de un atleta a otro de forma directa para ahorrar tiempo de tipeo.")
-        
+        st.markdown("### 👥 Clonación Semanal de Pizarras")
         col_c1, col_c2 = st.columns(2)
-        with col_c1: atleta_origen = st.selectbox("Atleta Origen (Copiar desde aquí):", lista_alumnos_con_neutro, key="at_origen")
-        with col_c2: atleta_destino = st.selectbox("Atleta Destino (Pegar rutina aquí):", lista_alumnos_con_neutro, key="at_destino")
-            
+        with col_c1: atleta_origen = st.selectbox("Atleta Origen:", lista_alumnos_con_neutro, key="at_origen")
+        with col_c2: atleta_destino = st.selectbox("Atleta Destino:", lista_alumnos_con_neutro, key="at_destino")
         if st.button("⚡ CLONAR RUTINA COMPLETA", use_container_width=True, type="primary"):
-            if atleta_origen == "- Seleccionar Atleta -" or atleta_destino == "- Seleccionar Atleta -":
-                st.error("❌ Debes seleccionar tanto el atleta de origen como el de destino.")
-            elif atleta_origen == atleta_destino:
-                st.error("❌ El atleta origen y destino no pueden ser el mismo.")
+            if atleta_origen == "- Seleccionar Atleta -" or atleta_destino == "- Seleccionar Atleta -": st.error("Seleccioná ambos.")
             else:
                 cursor.execute("SELECT nombre_rutina, ejercicio, bloque, series_objetivo, reps_objetivo FROM rutinas_asignadas WHERE alumno = ?", (atleta_origen,))
-                rutina_origen_datos = cursor.fetchall()
-                if not rutina_origen_datos:
-                    st.warning(f"El atleta {atleta_origen} no tiene ejercicios en su pizarra para copiar.")
-                else:
-                    # Limpiar destino antes de pegar la nueva
+                origen_datos = cursor.fetchall()
+                if origen_datos:
                     cursor.execute("DELETE FROM rutinas_asignadas WHERE alumno = ?", (atleta_destino,))
-                    for f_rut in rutina_origen_datos:
+                    for f_rut in origen_datos:
                         cursor.execute("INSERT INTO rutinas_asignadas (alumno, nombre_rutina, ejercicio, bloque, series_objetivo, reps_objetivo, fecha_asignacion) VALUES (?, ?, ?, ?, ?, ?, ?)", (atleta_destino, f_rut[0], f_rut[1], f_rut[2], f_rut[3], f_rut[4], datetime.now().strftime("%Y-%m-%d")))
                     conn.commit()
-                    st.success(f"🎉 ¡Pizarra clonada con éxito! {len(rutina_origen_datos)} ejercicios transferidos a {atleta_destino}.")
+                    st.success("🎉 ¡Pizarra copiada completa!")
                     st.rerun()
 
-    # 📋 FICHAS INTEGRADAS INLINE EN CADA EXPANSIBLE
+    # 📋 FICHAS CLÍNICAS
     with tab_fichas:
         st.markdown("### 📋 Fichas Clínicas")
         cursor.execute("SELECT nombre_apellido, usuario, fecha_nacimiento, peso, altura, deporte, objetivo FROM alumnos WHERE estado = 'aprobado' ORDER BY nombre_apellido ASC")
-        todos_al = cursor.fetchall()
-        
-        if not todos_al: st.info("No hay alumnos aprobados.")
-        else:
-            for al_fila in todos_al:
-                n_c, u_a, f_n, p_k, a_m, d_e, o_f = al_fila
-                with st.expander(f"👤 {n_c} | Deporte: {d_e} | Edad: {calcular_edad(f_n)} años"):
-                    st.text(f"• Usuario: {u_a}  • Peso: {p_k} kg  • Altura: {a_m} m\n• Foco: {o_f}")
-                    
-                    if st.checkbox("✍️ Editar Atleta", key=f"chk_{n_c.replace(' ','_')}"):
-                        with st.form(f"f_inline_{n_c.replace(' ','_')}"):
-                            nuevo_user = st.text_input("Usuario:", value=u_a)
-                            nuevo_dep = st.text_input("Deporte:", value=d_e)
-                            nuevo_peso = st.number_input("Peso:", value=float(p_k))
-                            nuevo_alt = st.number_input("Altura:", value=float(a_m))
-                            nuevo_obj = st.text_area("Objetivo:", value=o_f)
-                            
-                            c_b1, c_b2 = st.columns(2)
-                            with c_b1: 
-                                if st.form_submit_button("💾 Guardar"):
-                                    cursor.execute("UPDATE alumnos SET usuario=?, peso=?, altura=?, deporte=?, objetivo=? WHERE nombre_apellido=?", (nuevo_user, nuevo_peso, nuevo_alt, nuevo_dep, nuevo_obj, n_c))
-                                    conn.commit()
-                                    st.rerun()
-                            with c_b2:
-                                if st.form_submit_button("🗑️ ELIMINAR ACÁ", type="primary"):
-                                    cursor.execute("DELETE FROM alumnos WHERE nombre_apellido=?", (n_c,))
-                                    cursor.execute("DELETE FROM rutinas_asignadas WHERE alumno=?", (n_c,))
-                                    cursor.execute("DELETE FROM registros_entrenamiento WHERE alumno=?", (n_c,))
-                                    conn.commit()
-                                    st.rerun()
+        for al_fila in cursor.fetchall():
+            n_c, u_a, f_n, p_k, a_m, d_e, o_f = al_fila
+            with st.expander(f"👤 {n_c} | Deporte: {d_e} | Edad: {calcular_edad(f_n)} años"):
+                st.text(f"• Usuario: {u_a}  • Peso: {p_k} kg  • Altura: {a_m} m\n• Foco: {o_f}")
+                if st.checkbox("✍️ Editar Ficha", key=f"chk_{n_c.replace(' ','_')}"):
+                    with st.form(f"f_inline_{n_c.replace(' ','_')}"):
+                        nuevo_user = st.text_input("Usuario:", value=u_a)
+                        nuevo_dep = st.text_input("Deporte:", value=d_e)
+                        nuevo_peso = st.number_input("Peso:", value=float(p_k))
+                        nuevo_alt = st.number_input("Altura:", value=float(a_m))
+                        nuevo_obj = st.text_area("Objetivo:", value=o_f)
+                        if st.form_submit_button("💾 Guardar"):
+                            cursor.execute("UPDATE alumnos SET usuario=?, peso=?, altura=?, deporte=?, objetivo=? WHERE nombre_apellido=?", (nuevo_user, nuevo_peso, nuevo_alt, nuevo_dep, nuevo_obj, n_c))
+                            conn.commit()
+                            st.rerun()
 
-    # 👥 NUEVO PANEL: MODERADOR Y APROBADOR DE MATRÍCULAS
+    # 👥 MODERACIÓN DE ACCESO
     with tab_aprobaciones:
         st.markdown("### 👥 Solicitudes de Autoregistro Pendientes")
         cursor.execute("SELECT id, nombre_apellido, usuario, deporte, objetivo FROM alumnos WHERE estado = 'pendiente' ORDER BY id ASC")
         pendientes = cursor.fetchall()
-        
-        if not pendientes:
-            st.info("No hay solicitudes pendientes en este momento. El sistema está al día.")
+        if not pendientes: st.info("No hay solicitudes pendientes.")
         else:
             for p_atleta in pendientes:
                 p_id, p_nom, p_user, p_dep, p_obj = p_atleta
                 with st.container():
-                    st.markdown(f"**👤 Atleta:** `{p_nom}` | **Usuario propuesto:** `{p_user}`")
-                    st.text(f"• Disciplina: {p_dep}\n• Meta declarada: {p_obj}")
-                    
+                    st.markdown(f"**👤 Atleta:** `{p_nom}` | **Usuario:** `{p_user}`")
                     col_ap1, col_ap2, _ = st.columns([1, 1, 3])
                     with col_ap1:
-                        if st.button("✅ APROBAR ACCESO", key=f"ap_{p_id}"):
+                        if st.button("✅ APROBAR", key=f"ap_{p_id}"):
                             cursor.execute("UPDATE alumnos SET estado = 'aprobado' WHERE id = ?", (p_id,))
                             conn.commit()
-                            st.success(f"¡{p_nom} aprobado!")
                             st.rerun()
                     with col_ap2:
                         if st.button("❌ RECHAZAR", key=f"re_{p_id}", type="primary"):
                             cursor.execute("DELETE FROM alumnos WHERE id = ?", (p_id,))
                             conn.commit()
                             st.rerun()
-                    st.markdown("<hr style='margin:10px 0px; opacity:0.1;'/>", unsafe_allow_html=True)
-
-    with tab_excel:
-        st.markdown("### 📚 Importar Biblioteca (.xlsx / .csv)")
-        archivo_subido = st.file_uploader("Arrastrá tu archivo", type=["xlsx", "csv"])
-        if archivo_subido is not None:
-            try:
-                df_ejercicios = pd.read_excel(archivo_subido) if archivo_subido.name.endswith('.xlsx') else pd.read_csv(archivo_subido)
-                df_ejercicios.columns = df_ejercicios.columns.astype(str).str.strip()
-                columnas_actuales = df_ejercicios.columns.tolist()
-                col_nombre = next((c for c in columnas_actuales if c.lower() in ["nombre", "ejercicio", "name"]), None)
-                col_grupo = next((c for c in columnas_actuales if c.lower() in ["grupo", "musculo", "target"]), None)
-                col_video = next((c for c in columnas_actuales if c.lower() in ["video", "link", "url"]), None)
-                
-                if col_nombre and st.button("Confirmar Importación"):
-                    for _, fila in df_ejercicios.iterrows():
-                        n_val = str(fila[col_nombre]).strip()
-                        if n_val == "" or n_val.lower() == "nan": continue
-                        g_val = str(fila[col_grupo]).strip() if col_grupo else "General"
-                        v_val = str(fila[col_video]).strip() if col_video else ""
-                        cursor.execute("INSERT OR IGNORE INTO biblioteca_ejercicios (nombre, grupo_muscular, link_video) VALUES (?, ?, ?)", (n_val, g_val, v_val))
-                    conn.commit()
-                    st.success("¡Base importada con éxito!")
-                    st.rerun()
-            except Exception as e: st.error(f"Error: {e}")
