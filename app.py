@@ -2,10 +2,10 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 import bcrypt
-from datetime import datetime
+from datetime import datetime, date
 
 # ==========================================
-# 🔑 HELPERS DE CONTRASEÑAS (BCRYPT) - Se declaran antes para usarlos arriba
+# 🔑 HELPERS DE CONTRASEÑAS (BCRYPT)
 # ==========================================
 def hashear_password(password: str) -> str:
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
@@ -17,11 +17,24 @@ def verificar_password(password_ingresada: str, hash_guardado: str) -> bool:
         return password_ingresada == hash_guardado
 
 # ==========================================
+# 🛠️ HELPER: CÁLCULO DINÁMICO DE EDAD
+# ==========================================
+def calcular_edad(fecha_nac_str):
+    try:
+        if not fecha_nac_str or fecha_nac_str == "None":
+            return 0
+        fecha_nac = datetime.strptime(fecha_nac_str, "%Y-%m-%d").date()
+        hoy = date.today()
+        edad = hoy.year - fecha_nac.year - ((hoy.month, hoy.day) < (fecha_nac.month, fecha_nac.day))
+        return edad
+    except Exception:
+        return 0
+
+# ==========================================
 # 0. CONSTANTES GLOBALES
 # ==========================================
 BLOQUES = ["🔥 Entrada en Calor", "⚡ Bloque Principal", "🧘 Bloque Final / Vuelta a la Calma"]
 
-# Comprobamos de forma segura si los secretos de Streamlit están disponibles (Online vs Local)
 try:
     ADMIN_USER = st.secrets["admin_user"]
     ADMIN_PASS_HASH = st.secrets["admin_pass_hash"].encode()
@@ -44,14 +57,14 @@ def get_connection():
 conn = get_connection()
 cursor = conn.cursor()
 
-# Creación secuencial de tablas (Removido fecha_inicio de alumnos ya que se calcula dinámico)
+# Creación de tablas (Modificada columna edad por fecha_nacimiento)
 cursor.execute("""
     CREATE TABLE IF NOT EXISTS alumnos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         nombre_apellido TEXT UNIQUE,
         usuario TEXT UNIQUE,
         contrasena TEXT,
-        edad INTEGER,
+        fecha_nacimiento TEXT,
         peso REAL,
         altura REAL,
         deporte TEXT,
@@ -415,54 +428,99 @@ elif st.session_state["rol_actual"] == "admin":
             renderizar_tabla_entrenamiento(alumno_espejo, es_espejo=True)
 
     # =========================================================================
-    # 👀 ENFOQUE CALCULADO EN TAB_FICHAS: Fecha de Inicio 100% Automática y Real
+    # 👀 PANEL DE CONSULTA Y EDITOR CON CÁLCULO DINÁMICO DE EDAD
     # =========================================================================
     with tab_fichas:
-        st.markdown("### 📋 Base de Datos y Fichas Técnicas de Clientes")
-        df_base_alumnos = pd.read_sql_query("SELECT nombre_apellido, usuario, edad, peso, altura, deporte, objetivo FROM alumnos ORDER BY nombre_apellido ASC", conn)
+        st.markdown("### 📋 Fichas Técnicas y Editor de Clientes")
+        df_base_alumnos = pd.read_sql_query("SELECT nombre_apellido, usuario, fecha_nacimiento, peso, altura, deporte, objetivo FROM alumnos ORDER BY nombre_apellido ASC", conn)
         
         if df_base_alumnos.empty: 
             st.info("No hay alumnos registrados.")
         else:
             mes_actual_str = datetime.now().strftime("%Y-%m-%d")[:7]
             
-            # 1. Obtenemos cantidad de sesiones de este mes
-            cursor.execute("""
-                SELECT alumno, COUNT(DISTINCT SUBSTR(fecha, 1, 10)) 
-                FROM registros_entrenamiento 
-                WHERE fecha LIKE ? 
-                GROUP BY alumno
-            """, (f"{mes_actual_str}%",))
+            # Consultas dinámicas para la grilla
+            cursor.execute("SELECT alumno, COUNT(DISTINCT SUBSTR(fecha, 1, 10)) FROM registros_entrenamiento WHERE fecha LIKE ? GROUP BY alumno", (f"{mes_actual_str}%",))
             sesiones_por_alumno = dict(cursor.fetchall())
             
-            # 2. NUEVO: Obtenemos de forma precisa la fecha de su PRIMER registro en la historia
-            cursor.execute("""
-                SELECT alumno, MIN(fecha) 
-                FROM registros_entrenamiento 
-                GROUP BY alumno
-            """)
+            cursor.execute("SELECT alumno, MIN(fecha) FROM registros_entrenamiento GROUP BY alumno")
             primeras_sesiones = dict(cursor.fetchall())
             
-            # Mapeamos los datos dinámicos al DataFrame principal
             df_base_alumnos["Sesiones Este Mes"] = df_base_alumnos["nombre_apellido"].map(sesiones_por_alumno).fillna(0).astype(int)
-            
-            # Mapeamos la primera sesión. Si no existe, significa que nunca cerró una rutina.
             df_base_alumnos["Fecha de Inicio"] = df_base_alumnos["nombre_apellido"].map(primeras_sesiones).fillna("Pendiente (Sin entrenar)")
             
-            # Formateamos las columnas para la UI del Profesor
+            # Calculamos la edad al vuelo para cada fila de la tabla
+            df_base_alumnos["Edad"] = df_base_alumnos["fecha_nacimiento"].apply(calcular_edad)
+            
             df_formateado = df_base_alumnos[[
-                "nombre_apellido", "Fecha de Inicio", "Sesiones Este Mes", "usuario", "edad", "peso", "altura", "deporte", "objetivo"
+                "nombre_apellido", "Fecha de Inicio", "Sesiones Este Mes", "usuario", "Edad", "fecha_nacimiento", "peso", "altura", "deporte", "objetivo"
             ]].rename(columns={
-                "nombre_apellido": "Nombre y Apellido", 
-                "usuario": "Usuario Acceso", 
-                "edad": "Edad", 
-                "peso": "Peso (kg)", 
-                "altura": "Altura (m)", 
-                "deporte": "Especialidad Deportiva", 
-                "objetivo": "Foco Planificación"
+                "nombre_apellido": "Nombre y Apellido", "usuario": "Usuario Acceso", "fecha_nacimiento": "Fecha Nacimiento", "peso": "Peso (kg)", "altura": "Altura (m)", "deporte": "Especialidad Deportiva", "objetivo": "Foco Planificación"
             })
             st.dataframe(df_formateado, use_container_width=True, hide_index=True)
+            
+            st.divider()
+            
+            st.markdown("### 🛠️ Editor Clínico de Fichas")
+            alumno_editar = st.selectbox("👤 Seleccionar atleta para editar o remover permanentemente:", lista_alumnos, key="select_editor_atleta")
+            
+            if alumno_editar:
+                cursor.execute("SELECT usuario, fecha_nacimiento, peso, altura, deporte, objetivo FROM alumnos WHERE nombre_apellido = ?", (alumno_editar,))
+                datos_al = cursor.fetchone()
+                
+                if datos_al:
+                    # Parseamos la fecha guardada para que el calendario del editor se posicione en su fecha real
+                    try:
+                        fecha_nac_default = datetime.strptime(datos_al[1], "%Y-%m-%d").date()
+                    except Exception:
+                        fecha_nac_default = date(2000, 1, 1)
 
+                    with st.form("form_edicion_alumno", clear_on_submit=False):
+                        st.markdown(f"✍️ **Modificando los parámetros de:** `{alumno_editar}` (Edad calculada hoy: **{calcular_edad(datos_al[1])} años**)")
+                        col_ed1, col_ed2 = st.columns(2)
+                        with col_ed1: ed_user = st.text_input("Usuario Acceso (Login):", value=datos_al[0]).strip().lower()
+                        with col_ed2: ed_deporte = st.text_input("Especialidad Deportiva:", value=datos_al[4])
+                        
+                        col_ed3, col_ed4, col_ed5 = st.columns(3)
+                        with col_ed3: ed_nacimiento = st.date_input("Fecha de Nacimiento:", value=fecha_nac_default, min_value=date(1940, 1, 1), max_value=date.today())
+                        with col_ed4: ed_peso = st.number_input("Peso (kg):", min_value=0.0, step=0.1, value=float(datos_al[2]))
+                        with col_ed5: ed_altura = st.number_input("Altura (m):", min_value=0.0, step=0.01, value=float(datos_al[3]))
+                        
+                        ed_objetivo = st.text_area("Foco de la Planificación:", value=datos_al[5])
+                        
+                        col_sub_ed1, col_sub_ed2 = st.columns(2)
+                        with col_sub_ed1:
+                            btn_guardar_edicion = st.form_submit_button("💾 Guardar Cambios en Ficha", use_container_width=True)
+                        with col_sub_ed2:
+                            btn_eliminar_alumno = st.form_submit_button("🗑️ ELIMINAR ALUMNO PERMANENTEMENTE", type="primary", use_container_width=True)
+                    
+                    if btn_guardar_edicion:
+                        if ed_user == "":
+                            st.error("El usuario de acceso no puede quedar vacío.")
+                        else:
+                            try:
+                                cursor.execute("""
+                                    UPDATE alumnos 
+                                    SET usuario = ?, fecha_nacimiento = ?, peso = ?, altura = ?, deporte = ?, objetivo = ?
+                                    WHERE nombre_apellido = ?
+                                """, (ed_user, ed_nacimiento.strftime("%Y-%m-%d"), ed_peso, ed_altura, ed_deporte, ed_objetivo, alumno_editar))
+                                conn.commit()
+                                st.success(f"🎉 ¡Ficha de {alumno_editar} actualizada correctamente!")
+                                st.rerun()
+                            except sqlite3.IntegrityError:
+                                st.error("❌ El nombre de usuario ya está asignado a otro alumno.")
+                                
+                    if btn_eliminar_alumno:
+                        cursor.execute("DELETE FROM alumnos WHERE nombre_apellido = ?", (alumno_editar,))
+                        cursor.execute("DELETE FROM rutinas_asignadas WHERE alumno = ?", (alumno_editar,))
+                        cursor.execute("DELETE FROM registros_entrenamiento WHERE alumno = ?", (alumno_editar,))
+                        conn.commit()
+                        st.success(f"🔥 El alumno {alumno_editar} fue borrado por completo.")
+                        st.rerun()
+
+    # =========================================================================
+    # 👀 REGISTRO DE ALUMNO CON CALENDARIO DE NACIMIENTO
+    # =========================================================================
     with tab_alta:
         st.markdown("### 👤 Registro y Credenciales de Alumno")
         
@@ -475,10 +533,13 @@ elif st.session_state["rol_actual"] == "admin":
             col_cred1, col_cred2 = st.columns(2)
             with col_cred1: user_atleta = st.text_input("Nombre de Usuario (Login):").strip().lower()
             with col_cred2: pass_atleta = st.text_input("Contraseña de Acceso:", type="password")
+            
             col_a1, col_a2, col_a3 = st.columns(3)
-            with col_a1: edad = st.number_input("Edad:", min_value=1, max_value=100, value=20)
+            # Input de tipo Fecha nativo en lugar de número entero
+            with col_a1: nacimiento_f = st.date_input("Fecha de Nacimiento:", value=date(2000, 1, 1), min_value=date(1940, 1, 1), max_value=date.today())
             with col_a2: peso_f = st.number_input("Peso (kg):", min_value=0.0, step=0.1, value=70.0)
             with col_a3: altura_f = st.number_input("Altura (m):", min_value=0.0, step=0.01, value=1.75)
+            
             deporte = st.text_input("Especialidad Deportiva:")
             objetivo = st.text_area("Foco de la Planificación:")
             btn_alta = st.form_submit_button("Guardar y Crear Cuenta 👤")
@@ -490,11 +551,12 @@ elif st.session_state["rol_actual"] == "admin":
                 st.error("❌ La contraseña no puede estar vacía.")
             else:
                 try:
-                    # Insertamos los datos limpios sin el campo estático de fecha_inicio
+                    # Guardamos la fecha de nacimiento formateada como string estándar de base de datos
+                    str_nacimiento = nacimiento_f.strftime("%Y-%m-%d")
                     cursor.execute("""
-                        INSERT INTO alumnos (nombre_apellido, usuario, contrasena, edad, peso, altura, deporte, objetivo) 
+                        INSERT INTO alumnos (nombre_apellido, usuario, contrasena, fecha_nacimiento, peso, altura, deporte, objetivo) 
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (nombre_ap.strip(), user_atleta, hashear_password(pass_atleta), edad, peso_f, altura_f, deporte, objetivo))
+                    """, (nombre_ap.strip(), user_atleta, hashear_password(pass_atleta), str_nacimiento, peso_f, altura_f, deporte, objetivo))
                     conn.commit()
                     
                     st.session_state["mensaje_exito_alta"] = f"🎉 ¡Cuenta creada con éxito para {nombre_ap}! Formulario vaciado."
@@ -504,17 +566,54 @@ elif st.session_state["rol_actual"] == "admin":
                     st.error("❌ El nombre de usuario o atleta ya existe en el sistema.")
 
     with tab_excel:
-        st.markdown("### 📚 Sincronizar Biblioteca")
+        st.markdown("### 📚 Sincronizar Biblioteca de Ejercicios")
+        st.caption("Asegurarse de que su archivo tenga una columna para el nombre del ejercicio, otra para el grupo muscular y opcionalmente una para el link del video.")
+        
         archivo_subido = st.file_uploader("Arrastrá tu biblioteca (.xlsx o .csv)", type=["xlsx", "csv"])
+        
         if archivo_subido is not None:
             try:
-                df_ejercicios = pd.read_excel(archivo_subido) if archivo_subido.name.endswith('.xlsx') else pd.read_csv(archivo_subido)
-                df_ejercicios.columns = df_ejercicios.columns.str.strip().str.lower()
-                st.dataframe(df_ejercicios.head())
-                if st.button("🚀 Confirmar Sincronización"):
-                    for _, fila in df_ejercicios.iterrows():
-                        cursor.execute("INSERT OR IGNORE INTO biblioteca_ejercicios (nombre, grupo_muscular, link_video) VALUES (?, ?, ?)", (str(fila['nombre']), str(fila['grupo_muscular']), str(fila['link_video'])))
-                    conn.commit()
-                    st.success("💪 ¡Base sincronizada!")
-                    st.rerun()
-            except Exception as e: st.error(f"❌ Error: {e}")
+                if archivo_subido.name.endswith('.xlsx'):
+                    df_ejercicios = pd.read_excel(archivo_subido)
+                else:
+                    df_ejercicios = pd.read_csv(archivo_subido)
+                
+                df_ejercicios.columns = df_ejercicios.columns.astype(str).str.strip()
+                
+                st.markdown("📝 **Vista previa del archivo cargado:**")
+                st.dataframe(df_ejercicios.head(), use_container_width=True)
+                
+                columnas_actuales = df_ejercicios.columns.tolist()
+                
+                col_nombre = next((c for c in columnas_actuales if c.lower() in ["nombre", "ejercicio", "ejercicios", "name", "activity"]), None)
+                col_grupo = next((c for c in columnas_actuales if c.lower() in ["grupo_muscular", "grupo muscular", "grupo", "músculo", "musculo", "target"]), None)
+                col_video = next((c for c in columnas_actuales if c.lower() in ["link_video", "link video", "video", "link", "url"]), None)
+                
+                if not col_nombre:
+                    st.error("❌ No se encontró ninguna columna que represente el nombre del ejercicio.")
+                else:
+                    if st.button("🚀 Confirmar Sincronización e Importar"):
+                        filas_insertadas = 0
+                        for _, fila in df_ejercicios.iterrows():
+                            nombre_val = str(fila[col_nombre]).strip()
+                            if nombre_val == "" or nombre_val.lower() == "nan":
+                                continue
+                                
+                            grupo_val = str(fila[col_grupo]).strip() if col_grupo else "General"
+                            video_val = str(fila[col_video]).strip() if col_video else ""
+                            
+                            if grupo_val.lower() == "nan": grupo_val = "General"
+                            if video_val.lower() == "nan": video_val = ""
+                            
+                            cursor.execute("""
+                                INSERT OR IGNORE INTO biblioteca_ejercicios (nombre, grupo_muscular, link_video) 
+                                VALUES (?, ?, ?)
+                            """, (nombre_val, grupo_val, video_val))
+                            filas_insertadas += 1
+                            
+                        conn.commit()
+                        st.success(f"💪 ¡Base sincronizada correctamente! Se procesaron {filas_insertadas} ejercicios.")
+                        st.rerun()
+                        
+            except Exception as e: 
+                st.error(f"❌ Ocurrió un error al procesar el archivo: {e}")
