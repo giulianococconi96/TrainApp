@@ -12,7 +12,6 @@ try:
     SUPABASE_URL = st.secrets["supabase_url"]
     SUPABASE_KEY = st.secrets["supabase_key"]
 except Exception:
-    # Por si testeás localmente sin secrets
     SUPABASE_URL = "https://ogaoizovgrfabvmxyuee.supabase.co"
     SUPABASE_KEY = "TU_KEY_LOCAL"
 
@@ -35,8 +34,13 @@ def verificar_password(password_ingresada: str, hash_guardado: str) -> bool:
         return password_ingresada == hash_guardado
 
 # ==========================================
-# 🛠️ HELPERS: CÁLCULO DE EDAD Y MOTIVACIÓN
+# 📈 CALCULADORA DE 1RM ESTIMADO (EPLEY)
 # ==========================================
+def calcular_e1rm(peso, reps):
+    if reps == 0: return 0.0
+    if reps == 1: return float(peso)
+    return round(peso * (1 + reps / 30.0), 1)
+
 def calcular_edad(fecha_nac_str):
     try:
         if not fecha_nac_str or fecha_nac_str == "None":
@@ -48,31 +52,16 @@ def calcular_edad(fecha_nac_str):
         return 0
 
 def obtener_frase_motivacional(dias_acumulados):
-    frases_inicio = [
+    frases = [
         "¡Excelente primer paso! El camino a la alta competencia empieza hoy. 🚀",
-        "¡Buen comienzo! La constancia es el secreto del rendimiento. 💪"
-    ]
-    frases_racha_baja = [
+        "¡Buen comienzo! La constancia es el secreto del rendimiento. 💪",
         f"¡Suma y sigue! Ya van {dias_acumulados} entrenamientos este mes. ¡Buen ritmo! ⚡",
-        f"¡Cuerpo e intención enfocados! Llevás {dias_acumulados} sesiones. No aflojes. 🔥"
+        f"¡Cuerpo e intención enfocados! Llevás {dias_acumulados} sesiones. No aflojes. 🔥",
+        f"¡Tremenda disciplina! {dias_acumulados} días dándolo todo. Te estás volviendo imparable. 👑",
+        f"El esfuerzo de hoy es el rendimiento del mañana. ¡{dias_acumulados} sesiones acumuladas! 🏆",
+        f"¡Nivel Élite! 🔥 {dias_acumulados} entrenamientos en el mes. Sos un ejemplo de consistencia. 🦅"
     ]
-    frases_racha_media = [
-        f"¡Tremenda disciplina! {dias_acumulados} días adentro. Te estás volviendo imparable. 👑",
-        f"El esfuerzo de hoy es el rendimiento del mañana. ¡{dias_acumulados} sesiones acumuladas! 🏆"
-    ]
-    frases_elite = [
-        f"¡Nivel Élite! 🔥 {dias_acumulados} entrenamientos en el mes. Sos un ejemplo de consistencia. 🦅",
-        f"¡Impresionante! {dias_acumulados} días dándolo todo. La preparación vence al talento. 🥇"
-    ]
-    
-    if dias_acumulados <= 1:
-        return random.choice(frases_inicio)
-    elif dias_acumulados <= 5:
-        return random.choice(frases_racha_baja)
-    elif dias_acumulados <= 12:
-        return random.choice(frases_racha_media)
-    else:
-        return random.choice(frases_elite)
+    return random.choice(frases)
 
 # ==========================================
 # 0. CONSTANTES GLOBALES Y SESIÓN BORRADOR
@@ -96,6 +85,22 @@ except Exception:
 # 2. CONFIGURACIÓN VISUAL GENERAL (UI)
 # ==========================================
 st.set_page_config(page_title="TrainApp - Prof. Giuliano Cocconi", page_icon="⚡", layout="wide")
+
+# Estilos CSS específicos para compactar la visualización móvil horizontal
+st.markdown("""
+<style>
+    div[data-testid="column"] {
+        padding: 1px !important;
+    }
+    input {
+        text-align: center !important;
+    }
+    .block-container {
+        padding-top: 1.5rem !important;
+        padding-bottom: 1.5rem !important;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 st.markdown("<h1 style='text-align: center; margin-bottom: 0px;'>⚡ TRAINAPP</h1>", unsafe_allow_html=True)
 st.markdown("<p style='text-align: center; color: #84CC16; font-weight: bold; letter-spacing: 1px; margin-top: 0px;'>PROF. GIULIANO COCCONI - PREPARACIÓN FÍSICA PERSONALIZADA</p>", unsafe_allow_html=True)
@@ -132,7 +137,6 @@ if not st.session_state["autenticado"]:
                     st.session_state["rol_actual"] = "admin"
                     st.rerun()
                 else:
-                    # SELECT en Supabase
                     res = supabase.table("alumnos").select("nombre_apellido, contrasena, estado").eq("usuario", input_user).execute()
                     user_db = res.data
                     if user_db and verificar_password(input_pass, user_db[0]["contrasena"]):
@@ -164,17 +168,10 @@ if not st.session_state["autenticado"]:
                     st.error("❌ Todos los campos obligatorios deben estar completos.")
                 else:
                     try:
-                        # INSERT en Supabase
                         supabase.table("alumnos").insert({
-                            "nombre_apellido": reg_nombre.strip(),
-                            "usuario": reg_user,
-                            "contrasena": hashear_password(reg_pass),
-                            "fecha_nacimiento": reg_nacimiento.strftime("%Y-%m-%d"),
-                            "peso": reg_peso,
-                            "altura": reg_altura,
-                            "deporte": reg_deporte,
-                            "objetivo": reg_obj,
-                            "estado": "pendiente"
+                            "nombre_apellido": reg_nombre.strip(), "usuario": reg_user,
+                            "contrasena": hashear_password(reg_pass), "fecha_nacimiento": reg_nacimiento.strftime("%Y-%m-%d"),
+                            "peso": reg_peso, "altura": reg_altura, "deporte": reg_deporte, "objetivo": reg_obj, "estado": "pendiente"
                         }).execute()
                         st.success(f"🎉 ¡Registro enviado, {reg_nombre}! Quedó pendiente de aprobación.")
                     except Exception: st.error("❌ El usuario o nombre ya se encuentran registrados.")
@@ -193,18 +190,16 @@ if st.sidebar.button("🔒 Cerrar Sesión"):
     st.session_state["borrador_rutina"] = []
     st.rerun()
 
-# Lista de Alumnos Aprobados
 res_aprob = supabase.table("alumnos").select("nombre_apellido").eq("estado", "aprobado").order("nombre_apellido").execute()
 lista_alumnos = [f["nombre_apellido"] for f in res_aprob.data]
 lista_alumnos_con_neutro = ["- Seleccionar Atleta -"] + lista_alumnos
 
 # ==========================================
-# 📱 INTERFAZ ATLETA CON ASISTENCIA Y MOTIVACIÓN
+# 📱 INTERFAZ ATLETA CON CARGA HORIZONTAL Y HISTORIAL
 # ==========================================
 def renderizar_tabla_entrenamiento(nombre_atleta, es_espejo=False):
     sufijo = "esp" if es_espejo else "atl"
     
-    # Traemos rutina y cruzamos link_video de biblioteca
     res_rut = supabase.table("rutinas_asignadas").select("*").eq("alumno", nombre_atleta).execute()
     rutina_completa = res_rut.data
     
@@ -229,56 +224,81 @@ def renderizar_tabla_entrenamiento(nombre_atleta, es_espejo=False):
         
         if ejercicios_del_bloque:
             ejercicios_visibles_en_pantalla = True
-            st.markdown(f"<h4 style='color: #CCFF00; margin-top: 20px; background-color: #1E293B; padding: 6px 10px; border-radius: 4px;'>{sub_b}</h4>", unsafe_allow_html=True)
+            st.markdown(f"<h4 style='color: #CCFF00; margin-top: 15px; margin-bottom: 10px; background-color: #1E293B; padding: 6px 10px; border-radius: 4px;'>{sub_b}</h4>", unsafe_allow_html=True)
             
             for idx, ej in enumerate(ejercicios_del_bloque):
                 nombre_ejercicio = ej["ejercicio"]
                 series_prescritas = int(ej["series_objetivo"])
                 reps_prescritas = ej["reps_objetivo"]
                 
-                # Buscar link de video en biblioteca
                 res_v = supabase.table("biblioteca_ejercicios").select("link_video").eq("nombre", nombre_ejercicio).execute()
                 link_video = res_v.data[0]["link_video"] if res_v.data else ""
                 
+                # --- OBTENER HISTORIAL DE CARGA ANTERIOR ---
+                res_hist_prev = supabase.table("registros_entrenamiento").select("kilos, reps_reales, fecha").eq("alumno", nombre_atleta).eq("ejercicio", nombre_ejercicio).order("id", desc=True).limit(series_prescritas).execute()
+                texto_historial = ""
+                if res_hist_prev.data:
+                    hist_data = res_hist_prev.data
+                    detalles = ", ".join([f"{h['reps_reales']}R x {h['kilos']}kg" for h in reversed(hist_data)])
+                    texto_historial = f"⏮️ Última sesión ({hist_data[0]['fecha'].split(' ')[0]}): {detalles}"
+                else:
+                    texto_historial = "⏮️ Sin cargas anteriores registradas para este ejercicio."
+                
                 with st.container():
-                    col_t1, col_t2 = st.columns([3, 1])
-                    with col_t1: st.markdown(f"💪 **{nombre_ejercicio}** | `{series_prescritas}S x {reps_prescritas}R`")
-                    with col_t2: 
+                    # Fila 1: Encabezado Ejercicio, Reps Prescritas y Video
+                    col_h1, col_h2 = st.columns([3, 1])
+                    with col_h1: 
+                        st.markdown(f"🏋️‍♂️ **{nombre_ejercicio}** | `{series_prescritas}S x {reps_prescritas}R` Prescritas")
+                    with col_h2:
                         if link_video and "http" in link_video: st.markdown(f"[🎥 Video]({link_video})")
                     
+                    # Fila 2: Visualización de Carga Anterior de forma compacta
+                    st.markdown(f"<p style='font-size: 0.85rem; color: #94A3B8; margin-top: -8px; margin-bottom: 8px;'>{texto_historial}</p>", unsafe_allow_html=True)
+                    
+                    # Fila 3: Carga Horizontal (Adaptada al celular)
+                    # Creamos dinámicamente columnas de ancho parejo para las series prescritas
+                    columnas_visuales = st.columns(series_prescritas)
+                    
                     for s in range(1, series_prescritas + 1):
-                        key_id = f"{sufijo}_{nombre_atleta}_{idx}_{nombre_ejercicio.replace(' ', '_')}_s{s}"
-                        col_s1, col_s2, col_s3 = st.columns([1, 2, 2])
-                        with col_s1: st.markdown(f"<p style='margin-top: 30px; font-weight: bold; color: #94A3B8;'>S{s}</p>", unsafe_allow_html=True)
-                        with col_s2:
+                        with columnas_visuales[s-1]:
+                            st.markdown(f"<p style='text-align: center; margin-bottom: 1px; font-weight: bold; color: #CCFF00;'>S{s}</p>", unsafe_allow_html=True)
+                            key_id = f"{sufijo}_{nombre_atleta}_{idx}_{nombre_ejercicio.replace(' ', '_')}_s{s}"
+                            
+                            kilos_input = st.number_input(
+                                "kg", min_value=0.0, step=0.5, value=0.0, 
+                                key=f"k_{key_id}", label_visibility="collapsed"
+                            )
+                            
                             try: default_reps = int(reps_prescritas)
                             except: default_reps = 5
-                            reps_reales = st.number_input("Reps:", min_value=0, max_value=100, value=default_reps, key=f"rep_{key_id}")
-                        with col_s3: kilos_input = st.number_input("Kilos:", min_value=0.0, step=0.5, value=0.0, key=f"k_{key_id}")
-                        
-                        entradas_alumno[(nombre_ejercicio, s)] = {
-                            "ejercicio": nombre_ejercicio, "serie": s, "kilos": kilos_input, "reps_reales": reps_reales
-                        }
+                            
+                            reps_reales = st.number_input(
+                                "R", min_value=0, max_value=100, value=default_reps, 
+                                key=f"rep_{key_id}", label_visibility="collapsed"
+                            )
+                            
+                            entradas_alumno[(nombre_ejercicio, s)] = {
+                                "ejercicio": nombre_ejercicio, "serie": s, "kilos": kilos_input, "reps_reales": reps_reales
+                            }
                     
-                    # Identificador único de comentarios
+                    # Fila 4: Campo de comentarios del ejercicio unificado
                     nombre_ej_limpio = nombre_ejercicio.replace(" ", "_").replace("[", "").replace("]", "").replace("-", "")
                     dia_limpio = dia_a_entrenar.replace(" ", "_").replace("📅", "").replace("🏃", "")
                     sub_b_limpio = sub_b.replace(" ", "_").replace("🔥", "").replace("⚡", "").replace("🧘", "")
                     
                     notas_ejercicio = st.text_input(
-                        "Comentarios:", 
-                        placeholder="Ej: Liviano, molestia...", 
+                        "Anotaciones:", placeholder="Molestia, velocidad percibida...", 
                         key=f"not_{sufijo}_{idx}_{nombre_ej_limpio}_{dia_limpio}_{sub_b_limpio}"
                     )
-                    
                     for s in range(1, series_prescritas + 1): entradas_alumno[(nombre_ejercicio, s)]["notes_field"] = notas_ejercicio
-                    st.markdown("<hr style='margin: 12px 0px; opacity: 0.15;'/>", unsafe_allow_html=True)
+                    
+                    st.markdown("<hr style='margin: 15px 0px; opacity: 0.15;'/>", unsafe_allow_html=True)
                     
     if not ejercicios_visibles_en_pantalla:
         st.info(f"No tenés ejercicios cargados en el sistema para el día: **{dia_a_entrenar}**.")
         return
         
-    st.markdown("<h4 style='color: #84CC16; margin-top: 30px;'>📊 Evaluación General de la Sesión</h4>", unsafe_allow_html=True)
+    st.markdown("<h4 style='color: #84CC16; margin-top: 25px;'>📊 Evaluación General de la Sesión</h4>", unsafe_allow_html=True)
     col_g1, col_g2 = st.columns(2)
     with col_g1: rpe_global = st.select_slider("¿Qué tan dura estuvo la sesión hoy? (RPE Global):", options=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10], value=7)
     with col_g2: duracion_min = st.number_input("⏱️ ¿Cuántos minutos duró el entrenamiento?", min_value=1, max_value=300, value=60, step=5)
@@ -297,61 +317,143 @@ def renderizar_tabla_entrenamiento(nombre_atleta, es_espejo=False):
                     mes_ano_actual = datetime.now().strftime("%m-%Y")
                     nombre_reporte_dia = f"{nombre_de_la_rutina} ({dia_a_entrenar})"
                     
+                    # Variables para detectar el e1RM máximo alcanzado en la sesión
+                    max_e1rm = 0.0
+                    mejor_ej_e1rm = ""
+                    
                     for datos in datos_validos:
                         supabase.table("registros_entrenamiento").insert({
-                            "fecha": fecha_actual,
-                            "alumno": nombre_atleta,
-                            "nombre_rutina": nombre_reporte_dia,
-                            "ejercicio": datos["ejercicio"],
-                            "nro_serie": datos["serie"],
-                            "kilos": datos["kilos"],
-                            "reps_reales": datos["reps_reales"],
-                            "rpe_serie": 0.0,
-                            "notas": datos["notes_field"],
-                            "rpe_global_sesion": rpe_global,
-                            "duracion_minutos": duracion_min
+                            "fecha": fecha_actual, "alumno": nombre_atleta, "nombre_rutina": nombre_reporte_dia,
+                            "ejercicio": datos["ejercicio"], "nro_serie": datos["serie"], "kilos": datos["kilos"],
+                            "reps_reales": datos["reps_reales"], "rpe_serie": 0.0, "notas": datos["notes_field"],
+                            "rpe_global_sesion": rpe_global, "duracion_minutos": duracion_min
                         }).execute()
+                        
+                        # Calculamos e1RM de la serie actual
+                        e1rm_calc = calcular_e1rm(datos["kilos"], datos["reps_reales"])
+                        if e1rm_calc > max_e1rm:
+                            max_e1rm = e1rm_calc
+                            mejor_ej_e1rm = datos["ejercicio"]
                     
                     supabase.table("asistencia").insert({
-                        "fecha": fecha_hoy_texto,
-                        "mes_ano": mes_ano_actual,
-                        "alumno": nombre_atleta
+                        "fecha": fecha_hoy_texto, "mes_ano": mes_ano_actual, "alumno": nombre_atleta
+                    }).execute()
+                    
+                    # Crear notificación automática para el Profe Giuliano
+                    supabase.table("notificaciones").insert({
+                        "destinatario": "giuliano",
+                        "mensaje": f"🏃 {nombre_atleta} finalizó su entrenamiento: {nombre_reporte_dia}."
                     }).execute()
                     
                     res_tot = supabase.table("asistencia").select("id", count="exact").eq("alumno", nombre_atleta).eq("mes_ano", mes_ano_actual).execute()
                     total_dias = res_tot.count if res_tot.count is not None else len(res_tot.data)
                     
-                    st.session_state["mensaje_motivacional_pop"] = obtener_frase_motivacional(total_dias)
+                    msg_motivacional = obtener_frase_motivacional(total_dias)
+                    if max_e1rm > 0:
+                        msg_motivacional += f"\n\n🔥 **Hito de Fuerza hoy:** Tu 1RM estimado en *{mejor_ej_e1rm}* llegó a **{max_e1rm} kg**. ¡Tremendo!"
+                    
+                    st.session_state["mensaje_motivacional_pop"] = msg_motivacional
                     st.success("🚀 ¡Entrenamiento enviado correctamente al Profe!")
                     st.rerun()
 
 if "mensaje_motivacional_pop" in st.session_state:
     st.balloons()
     st.toast(st.session_state["mensaje_motivacional_pop"], icon="🏆")
-    st.markdown(f"<div style='background-color: #1E293B; border-left: 5px solid #84CC16; padding: 15px; border-radius: 4px; margin-bottom: 20px;'><strong>🏅 TU MENSAJE DE HOY:</strong><br/>{st.session_state['mensaje_motivacional_pop']}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div style='background-color: #1E293B; border-left: 5px solid #84CC16; padding: 15px; border-radius: 4px; margin-bottom: 20px;'><strong>🏅 DESEMPEÑO DEL DÍA:</strong><br/>{st.session_state['mensaje_motivacional_pop']}</div>", unsafe_allow_html=True)
     del st.session_state["mensaje_motivacional_pop"]
 
 # ==========================================
-# 🚀 PANTALLAS SEGÚN ROL
+# 🚀 PANTALLAS SEGÚN ROL (ATLETA)
 # ==========================================
 if st.session_state["rol_actual"] == "atleta":
     alumno_logueado = st.session_state["usuario_actual"]
-    st.markdown(f"### 👋 ¡Hola, **{alumno_logueado}**!")
-    tab_entrenar, tab_progreso = st.tabs(["🏋️‍♂️ Mi Sesión", "📈 Mi Historial"])
-    with tab_entrenar: renderizar_tabla_entrenamiento(alumno_logueado, es_espejo=False)
-    with tab_progreso:
-        res_hist = supabase.table("registros_entrenamiento").select("fecha, nombre_rutina, ejercicio, nro_serie, kilos, reps_reales, notas").eq("alumno", alumno_logueado).order("id", desc=True).execute()
-        if not res_hist.data: st.info("Aún no registrás entrenamientos.")
-        else:
-            df_hist = pd.DataFrame(res_hist.data)
-            st.dataframe(df_hist.rename(columns={
-                "nombre_rutina": "Plan / Día", "fecha":"Fecha", "ejercicio":"Ejercicio", 
-                "nro_serie":"Serie", "kilos":"Kilos", "reps_reales":"Reps", "notas":"Notas"
-            }), use_container_width=True, hide_index=True)
+    
+    # 🔔 COMPONENTE DE NOTIFICACIONES (BANNER DESPLEGABLE)
+    res_notif = supabase.table("notificaciones").select("id, mensaje").eq("destinatario", alumno_logueado).eq("leido", False).execute()
+    if res_notif.data:
+        for noti in res_notif.data:
+            st.warning(f"🔔 **Notificación:** {noti['mensaje']}")
+            if st.button("Entendido / Descartar", key=f"desc_{noti['id']}"):
+                supabase.table("notificaciones").update({"leido": True}).eq("id", noti["id"]).execute()
+                st.rerun()
 
+    st.markdown(f"### 👋 ¡Hola, **{alumno_logueado}**!")
+    
+    tab_entrenar, tab_progreso, tab_consultas = st.tabs(["🏋️‍♂️ Mi Sesión", "📈 Mi Progreso", "💬 Dudas al Profe"])
+    
+    with tab_entrenar: 
+        renderizar_tabla_entrenamiento(alumno_logueado, es_espejo=False)
+        
+    with tab_progreso:
+        st.markdown("### 📈 Tu Evolución Deportiva")
+        
+        # Gráficos dinámicos
+        res_hist = supabase.table("registros_entrenamiento").select("fecha, ejercicio, kilos, reps_reales, rpe_global_sesion, duracion_minutos").eq("alumno", alumno_logueado).execute()
+        if not res_hist.data:
+            st.info("Aún no registrás entrenamientos en la base de datos para armar tus gráficos.")
+        else:
+            df_hist_at = pd.DataFrame(res_hist.data)
+            
+            # Gráfico 1: Fuerza Máxima Estimada (e1RM) a lo largo del tiempo
+            df_hist_at["e1rm"] = df_hist_at.apply(lambda r: calcular_e1rm(r["kilos"], r["reps_reales"]), axis=1)
+            df_hist_at["fecha_corta"] = df_hist_at["fecha"].apply(lambda f: f.split(" ")[0])
+            
+            st.markdown("#### 💪 Evolución del 1RM Estimado por Ejercicio")
+            lista_ejs_hist = sorted(df_hist_at["ejercicio"].unique())
+            ej_grafica = st.selectbox("Elegí el ejercicio para ver tu fuerza histórica:", lista_ejs_hist)
+            
+            df_ej_filtrado = df_hist_at[df_hist_at["ejercicio"] == ej_grafica].groupby("fecha_corta")["e1rm"].max().reset_index()
+            st.line_chart(df_ej_filtrado.set_index("fecha_corta")["e1rm"])
+            
+            # Gráfico 2: Fatiga Acumulada sRPE
+            st.markdown("#### ⏱️ Fatiga Interna Semanal (sRPE)")
+            df_sesiones_unique = df_hist_at.drop_duplicates(subset=["fecha_corta"]).copy()
+            df_sesiones_unique["carga_srpe"] = df_sesiones_unique["rpe_global_sesion"] * df_sesiones_unique["duracion_minutos"]
+            
+            st.line_chart(df_sesiones_unique.set_index("fecha_corta")["carga_srpe"])
+            
+    with tab_consultas:
+        st.markdown("### 💬 Canal de Dudas al Profe")
+        
+        # Enviar nuevo mensaje
+        with st.form("form_mensaje_alumno", clear_on_submit=True):
+            nuevo_msg = st.text_area("Escribí tu consulta técnica (recorrido, molestias, fatiga):")
+            btn_env_msg = st.form_submit_button("Enviar Consulta 🚀")
+            
+        if btn_env_msg and nuevo_msg.strip() != "":
+            supabase.table("consultas_mensajes").insert({
+                "alumno": alumno_logueado, "mensaje": nuevo_msg.strip()
+            }).execute()
+            st.success("📩 ¡Mensaje enviado al Profe Giuliano!")
+            st.rerun()
+            
+        st.divider()
+        st.markdown("#### 📬 Historial de Respuestas")
+        res_msgs = supabase.table("consultas_mensajes").select("*").eq("alumno", alumno_logueado).order("id", desc=True).execute()
+        for msg in res_msgs.data:
+            with st.container():
+                st.markdown(f"**Tú ({msg['fecha'].split('T')[0]}):** *{msg['mensaje']}*")
+                if msg["respuesta"]:
+                    st.markdown(f"<p style='color: #84CC16;'><strong>Profe Giuliano:</strong> {msg['respuesta']}</p>", unsafe_allow_html=True)
+                else:
+                    st.markdown("⏳ *Esperando respuesta...*")
+                st.markdown("---")
+
+# ==========================================
+# 🚀 PANTALLAS SEGÚN ROL (COACH/ADMIN)
+# ==========================================
 elif st.session_state["rol_actual"] == "admin":
-    tab_dashboard, tab_rutinas, tab_clonar, tab_fichas, tab_aprobaciones, tab_excel = st.tabs([
-        "📊 Historial", "📝 Diseñar Plan", "👥 Clonar Pizarra", "📋 Fichas Clínicas", "👥 Aprobar Atletas", "📚 Biblioteca"
+    # 🔔 Alertas automáticas para el Administrador
+    res_notif_ad = supabase.table("notificaciones").select("id, mensaje").eq("destinatario", "giuliano").eq("leido", False).execute()
+    if res_notif_ad.data:
+        for noti in res_notif_ad.data:
+            st.toast(noti["mensaje"], icon="🏃")
+            if st.button("Marcar como leído", key=f"desc_ad_{noti['id']}"):
+                supabase.table("notificaciones").update({"leido": True}).eq("id", noti["id"]).execute()
+                st.rerun()
+
+    tab_dashboard, tab_rutinas, tab_clonar, tab_consultas_profe, tab_fichas, tab_aprobaciones, tab_excel = st.tabs([
+        "📊 Historial", "📝 Diseñar Plan", "👥 Clonar Pizarra", "💬 Mensajes Recibidos", "📋 Fichas Clínicas", "👥 Aprobar Atletas", "📚 Biblioteca"
     ])
     
     with tab_dashboard:
@@ -359,8 +461,6 @@ elif st.session_state["rol_actual"] == "admin":
         
         mes_ano_actual = datetime.now().strftime("%m-%Y")
         st.markdown(f"#### 📅 Control de Asistencia Mensual ({mes_ano_actual})")
-        
-        # Simulación de GROUP BY con lectura limpia
         res_asist_m = supabase.table("asistencia").select("alumno").eq("mes_ano", mes_ano_actual).execute()
         if not res_asist_m.data:
             st.info("Ningún atleta registró asistencia todavía este mes.")
@@ -372,8 +472,7 @@ elif st.session_state["rol_actual"] == "admin":
         
         fecha_actual_hoy = datetime.now().strftime("%Y-%m-%d")
         res_alertas = supabase.table("registros_entrenamiento").select("alumno, ejercicio, notas").like("fecha", f"{fecha_actual_hoy}%").execute()
-        
-        df_alertas_list = [r for r in res_alertas.data if any(palabra in str(r["notas"]).lower() for palabra in ["dolor", "molestia", "tiron", "molesto"])]
+        df_alertas_list = [r for r in res_alertas.data if any(p in str(r["notas"]).lower() for p in ["dolor", "molestia", "tiron", "molesto"])]
         if df_alertas_list:
             st.markdown("#### ⚠️ SEMÁFORO DE ALERTAS CLÍNICAS (HOY)")
             for al_row in df_alertas_list:
@@ -439,14 +538,14 @@ elif st.session_state["rol_actual"] == "admin":
                     else:
                         res_ejs = supabase.table("biblioteca_ejercicios").select("nombre").eq("grupo_muscular", patron_seleccionado).order("nombre").execute()
                 else:
-                    st.info("💡 Tu biblioteca está vacía. Podés usar el ingreso manual o cargar el Excel en la pestaña 'Biblioteca'.")
+                    st.info("💡 Tu biblioteca está vacía.")
                     res_ejs = supabase.table("biblioteca_ejercicios").select("nombre").order("nombre").execute()
                     
                 ejercicios_filtrados = [fila["nombre"] for fila in res_ejs.data]
                 if ejercicios_filtrados: ejercicio_final = st.selectbox("Seleccionar Ejercicio:", ejercicios_filtrados)
                 else: ejercicio_final = st.text_input("No hay ejercicios. Escribilo acá:")
             else:
-                ejercicio_final = st.text_input("Escribí el ejercicio o trabajo aeróbico/libre:", placeholder="Ej: Pasadas 400m / Sentadilla Libre")
+                ejercicio_final = st.text_input("Escribí el ejercicio o trabajo aeróbico/libre:", placeholder="Ej: Pasadas 400m")
 
             col_r1, col_r2 = st.columns(2)
             with col_r1: series_obj = st.number_input("Series prescritas:", min_value=1, max_value=20, value=4)
@@ -476,14 +575,17 @@ elif st.session_state["rol_actual"] == "admin":
                         fecha_hoy = datetime.now().strftime("%Y-%m-%d")
                         for item in st.session_state["borrador_rutina"]:
                             supabase.table("rutinas_asignadas").insert({
-                                "alumno": alumno_rutina,
-                                "nombre_rutina": nombre_de_la_rutina.strip(),
-                                "ejercicio": item["ejercicio"],
-                                "bloque": item["bloque"],
-                                "series_objetivo": item["series"],
-                                "reps_objetivo": item["reps"],
-                                "fecha_asignacion": fecha_hoy
+                                "alumno": alumno_rutina, "nombre_rutina": nombre_de_la_rutina.strip(),
+                                "ejercicio": item["ejercicio"], "bloque": item["bloque"],
+                                "series_objetivo": item["series"], "reps_objetivo": item["reps"], "fecha_asignacion": fecha_hoy
                             }).execute()
+                        
+                        # Generar notificación para el Alumno
+                        supabase.table("notificaciones").insert({
+                            "destinatario": alumno_rutina,
+                            "mensaje": f"🏋️‍♂️ El Profe Giuliano actualizó tu planificación mensual: {nombre_de_la_rutina.strip()}."
+                        }).execute()
+                        
                         st.session_state["borrador_rutina"] = []
                         st.success(f"🎉 ¡Planificación publicada con éxito para **{alumno_rutina}**!")
                         st.rerun()
@@ -522,16 +624,39 @@ elif st.session_state["rol_actual"] == "admin":
                     fecha_hoy = datetime.now().strftime("%Y-%m-%d")
                     for f_rut in origen_datos:
                         supabase.table("rutinas_asignadas").insert({
-                            "alumno": atleta_destino,
-                            "nombre_rutina": f_rut["nombre_rutina"],
-                            "ejercicio": f_rut["ejercicio"],
-                            "bloque": f_rut["bloque"],
-                            "series_objetivo": f_rut["series_objetivo"],
-                            "reps_objetivo": f_rut["reps_objetivo"],
-                            "fecha_asignacion": fecha_hoy
+                            "alumno": atleta_destino, "nombre_rutina": f_rut["nombre_rutina"],
+                            "ejercicio": f_rut["ejercicio"], "bloque": f_rut["bloque"],
+                            "series_objetivo": f_rut["series_objetivo"], "reps_objetivo": f_rut["reps_objetivo"], "fecha_asignacion": fecha_hoy
                         }).execute()
+                    
+                    # Notificar al alumno destino
+                    supabase.table("notificaciones").insert({
+                        "destinatario": atleta_destino,
+                        "mensaje": f"🏋️‍♂️ El Profe Giuliano actualizó tu planificación mensual clonando una pizarra activa."
+                    }).execute()
+                    
                     st.success("🎉 ¡Pizarra copiada completa!")
                     st.rerun()
+
+    with tab_consultas_profe:
+        st.markdown("### 📬 Mensajes y Consultas de Atletas")
+        res_cli_msg = supabase.table("consultas_mensajes").select("*").order("id", desc=True).execute()
+        if not res_cli_msg.data:
+            st.info("No hay mensajes o consultas de atletas todavía.")
+        else:
+            for c_msg in res_cli_msg.data:
+                with st.container():
+                    st.markdown(f"👤 **{c_msg['alumno']}** ({c_msg['fecha'].split('T')[0]}): *\"{c_msg['mensaje']}\"*")
+                    if c_msg["respuesta"]:
+                        st.markdown(f"✅ Respondido: *{c_msg['respuesta']}*")
+                    else:
+                        with st.form(f"resp_f_{c_msg['id']}", clear_on_submit=True):
+                            txt_resp = st.text_input("Escribí tu respuesta técnica:")
+                            btn_resp = st.form_submit_button("Responder Consulta 📤")
+                        if btn_resp and txt_resp.strip() != "":
+                            supabase.table("consultas_mensajes").update({"respuesta": txt_resp.strip()}).eq("id", c_msg["id"]).execute()
+                            st.rerun()
+                st.markdown("---")
 
     with tab_fichas:
         st.markdown("### 📋 Fichas Clínicas")
@@ -556,11 +681,8 @@ elif st.session_state["rol_actual"] == "admin":
                         nuevo_obj = st.text_area("Objetivo:", value=o_f)
                         if st.form_submit_button("💾 Guardar"):
                             supabase.table("alumnos").update({
-                                "usuario": nuevo_user,
-                                "peso": nuevo_peso,
-                                "altura": nuevo_alt,
-                                "deporte": nuevo_dep,
-                                "objetivo": nuevo_obj
+                                "usuario": nuevo_user, "peso": nuevo_peso, "altura": nuevo_alt,
+                                "deporte": nuevo_dep, "objetivo": nuevo_obj
                             }).eq("nombre_apellido", n_c).execute()
                             st.rerun()
 
@@ -591,7 +713,6 @@ elif st.session_state["rol_actual"] == "admin":
         
         st.warning("⚠️ Si querés reiniciar de cero tu biblioteca actual en la nube de Supabase antes de cargar el archivo, tocá el botón rojo de abajo:")
         if st.button("🗑️ VACIAR BIBLIOTECA EN SUPABASE", use_container_width=True, type="secondary"):
-            # Borrado simple por API
             supabase.table("biblioteca_ejercicios").delete().neq("id", 0).execute()
             st.success("✨ ¡Biblioteca vaciada con éxito!")
             st.rerun()
@@ -622,13 +743,10 @@ elif st.session_state["rol_actual"] == "admin":
                             g_val = str(fila[col_grupo]).strip() if (col_grupo and str(fila[col_grupo]).strip().lower() != "nan") else "General"
                             v_val = str(fila[col_video]).strip() if (col_video and str(fila[col_video]).strip().lower() != "nan") else ""
                             
-                            # Evitamos duplicados por nombre
                             res_dup = supabase.table("biblioteca_ejercicios").select("id").eq("nombre", n_val).execute()
                             if not res_dup.data:
                                 supabase.table("biblioteca_ejercicios").insert({
-                                    "nombre": n_val,
-                                    "grupo_muscular": g_val,
-                                    "link_video": v_val
+                                    "nombre": n_val, "grupo_muscular": g_val, "link_video": v_val
                                 }).execute()
                                 contador_insertados += 1
                         st.success(f"🎉 ¡Procesados {contador_insertados} ejercicios correctamente!")
