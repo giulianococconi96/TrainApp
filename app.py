@@ -708,25 +708,48 @@ elif st.session_state["rol_actual"] == "admin":
                 col_grupo = next((c for c in columnas_actuales if c.lower() in ["grupo", "grupo muscular", "grupo_muscular", "musculo", "target", "patron"]), None)
                 col_video = next((c for c in columnas_actuales if c.lower() in ["video", "link", "url", "link_video"]), None)
                 
-                if not col_nombre: st.error("❌ El archivo debe tener una columna llamada 'nombre' o 'ejercicio'.")
+                if not col_nombre: 
+                    st.error("❌ El archivo debe tener una columna llamada 'nombre' o 'ejercicio'.")
                 else:
-                    st.success(f"📋 Archivo detectado. Filas: {len(df_ejercicios)}")
+                    st.success(f"📋 Archivo detectado correctamente. Filas totales: {len(df_ejercicios)}")
                     st.dataframe(df_ejercicios.head(10), use_container_width=True)
                     
                     if st.button("📥 CONFIRMAR E INYECTAR A LA BIBLIOTECA", use_container_width=True, type="primary"):
-                        contador_insertados = 0
+                        # 1. Traemos de una sola vez los nombres ya existentes en la base para comparar en memoria
+                        res_existentes = supabase.table("biblioteca_ejercicios").select("nombre").execute()
+                        nombres_existentes = {fila["nombre"].lower().strip() for fila in res_existentes.data} if res_existentes.data else set()
+                        
+                        lote_nuevos = []
+                        nombres_en_este_excel = set() # Evita duplicados dentro del mismo Excel cargado
+                        
                         for _, fila in df_ejercicios.iterrows():
                             n_val = str(fila[col_nombre]).strip()
-                            if n_val == "" or n_val.lower() == "nan": continue
+                            if n_val == "" or n_val.lower() == "nan": 
+                                continue
+                            
+                            n_val_lower = n_val.lower()
+                            
+                            # Si ya existe en la base de datos o ya lo procesamos en este loop, lo salteamos silenciosamente
+                            if n_val_lower in nombres_existentes or n_val_lower in nombres_en_este_excel:
+                                continue
+                            
                             g_val = str(fila[col_grupo]).strip() if (col_grupo and str(fila[col_grupo]).strip().lower() != "nan") else "General"
                             v_val = str(fila[col_video]).strip() if (col_video and str(fila[col_video]).strip().lower() != "nan") else ""
                             
-                            res_dup = supabase.table("biblioteca_ejercicios").select("id").eq("nombre", n_val).execute()
-                            if not res_dup.data:
-                                supabase.table("biblioteca_ejercicios").insert({
-                                    "nombre": n_val, "grupo_muscular": g_val, "link_video": v_val
-                                }).execute()
-                                contador_insertados += 1
-                        st.success(f"🎉 ¡Procesados {contador_insertados} ejercicios correctamente!")
+                            lote_nuevos.append({
+                                "nombre": n_val,
+                                "grupo_muscular": g_val,
+                                "link_video": v_val
+                            })
+                            nombres_en_este_excel.add(n_val_lower)
+                        
+                        # 2. Inyectamos todo el lote en un único viaje a Supabase
+                        if lote_nuevos:
+                            supabase.table("biblioteca_ejercicios").insert(lote_nuevos).execute()
+                            st.success(f"🎉 ¡Inyección masiva completada! Se agregaron {len(lote_nuevos)} ejercicios nuevos sin duplicar nada.")
+                        else:
+                            st.info("ℹ️ No se detectaron ejercicios nuevos en el Excel. Todos los que subiste ya existen en tu biblioteca de Supabase.")
+                        
                         st.rerun()
-            except Exception as e: st.error(f"❌ Error al procesar archivo: {e}")
+            except Exception as e: 
+                st.error(f"❌ Error al procesar archivo: {e}")
