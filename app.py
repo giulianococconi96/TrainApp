@@ -1,9 +1,26 @@
 import streamlit as st
-import sqlite3
+from supabase import create_client, Client
 import pandas as pd
 import bcrypt
 import random
 from datetime import datetime, date
+
+# ==========================================
+# 🔑 CONEXIÓN A SUPABASE (DESDE SECRETS)
+# ==========================================
+try:
+    SUPABASE_URL = st.secrets["supabase_url"]
+    SUPABASE_KEY = st.secrets["supabase_key"]
+except Exception:
+    # Por si testeás localmente sin secrets
+    SUPABASE_URL = "https://ogaoizovgrfabvmxyuee.supabase.co"
+    SUPABASE_KEY = "TU_KEY_LOCAL"
+
+@st.cache_resource
+def init_supabase() -> Client:
+    return create_client(SUPABASE_URL, SUPABASE_KEY)
+
+supabase = init_supabase()
 
 # ==========================================
 # 🔑 HELPERS DE CONTRASEÑAS (BCRYPT)
@@ -76,78 +93,6 @@ except Exception:
     MODO_LOCAL = True
 
 # ==========================================
-# 1. CONFIGURACIÓN DE LA BASE DE DATOS
-# ==========================================
-@st.cache_resource
-def get_connection():
-    conn = sqlite3.connect("gimnasio.db", check_same_thread=False)
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
-
-conn = get_connection()
-cursor = conn.cursor()
-
-cursor.execute("""
-    CREATE TABLE IF NOT EXISTS alumnos (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nombre_apellido TEXT UNIQUE,
-        usuario TEXT UNIQUE,
-        contrasena TEXT,
-        fecha_nacimiento TEXT,
-        peso REAL,
-        altura REAL,
-        deporte TEXT,
-        objetivo TEXT,
-        estado TEXT DEFAULT 'pendiente'
-    )
-""")
-cursor.execute("""
-    CREATE TABLE IF NOT EXISTS biblioteca_ejercicios (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, 
-        nombre TEXT UNIQUE, 
-        grupo_muscular TEXT, 
-        link_video TEXT
-    )
-""")
-cursor.execute("""
-    CREATE TABLE IF NOT EXISTS rutinas_asignadas (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, 
-        alumno TEXT, 
-        nombre_rutina TEXT,
-        ejercicio TEXT, 
-        bloque TEXT, 
-        series_objetivo INTEGER, 
-        reps_objetivo TEXT, 
-        fecha_asignacion TEXT
-    )
-""")
-cursor.execute("""
-    CREATE TABLE IF NOT EXISTS registros_entrenamiento (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, 
-        fecha TEXT, 
-        alumno TEXT, 
-        nombre_rutina TEXT,
-        ejercicio TEXT, 
-        nro_serie INTEGER,
-        kilos REAL, 
-        reps_reales INTEGER,
-        rpe_serie REAL, 
-        notas TEXT,
-        rpe_global_sesion REAL,
-        duracion_minutos INTEGER
-    )
-""")
-cursor.execute("""
-    CREATE TABLE IF NOT EXISTS asistencia (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        fecha TEXT,
-        mes_ano TEXT,
-        alumno TEXT
-    )
-""")
-conn.commit()
-
-# ==========================================
 # 2. CONFIGURACIÓN VISUAL GENERAL (UI)
 # ==========================================
 st.set_page_config(page_title="TrainApp - Prof. Giuliano Cocconi", page_icon="⚡", layout="wide")
@@ -187,14 +132,15 @@ if not st.session_state["autenticado"]:
                     st.session_state["rol_actual"] = "admin"
                     st.rerun()
                 else:
-                    cursor.execute("SELECT nombre_apellido, contrasena, estado FROM alumnos WHERE usuario = ?", (input_user,))
-                    user_db = cursor.fetchone()
-                    if user_db and verificar_password(input_pass, user_db[1]):
-                        if user_db[2] == "pendiente":
+                    # SELECT en Supabase
+                    res = supabase.table("alumnos").select("nombre_apellido, contrasena, estado").eq("usuario", input_user).execute()
+                    user_db = res.data
+                    if user_db and verificar_password(input_pass, user_db[0]["contrasena"]):
+                        if user_db[0]["estado"] == "pendiente":
                             st.warning("⏳ Tu cuenta está pendiente de aprobación por el Prof. Giuliano.")
                         else:
                             st.session_state["autenticado"] = True
-                            st.session_state["usuario_actual"] = user_db[0]
+                            st.session_state["usuario_actual"] = user_db[0]["nombre_apellido"]
                             st.session_state["rol_actual"] = "atleta"
                             st.rerun()
                     else: st.error("❌ Usuario o contraseña incorrectos.")
@@ -218,21 +164,28 @@ if not st.session_state["autenticado"]:
                     st.error("❌ Todos los campos obligatorios deben estar completos.")
                 else:
                     try:
-                        cursor.execute("""
-                            INSERT INTO alumnos (nombre_apellido, usuario, contrasena, fecha_nacimiento, peso, altura, deporte, objetivo, estado) 
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pendiente')
-                        """, (reg_nombre.strip(), reg_user, hashear_password(reg_pass), reg_nacimiento.strftime("%Y-%m-%d"), reg_peso, reg_altura, reg_deporte, reg_obj))
-                        conn.commit()
-                        st.success(f"🎉 ¡Registro enviado, {reg_nombre}! Quedó pendiente de aprobación por el Profe.")
-                    except sqlite3.IntegrityError: st.error("❌ El usuario o nombre ya se encuentran registrados.")
+                        # INSERT en Supabase
+                        supabase.table("alumnos").insert({
+                            "nombre_apellido": reg_nombre.strip(),
+                            "usuario": reg_user,
+                            "contrasena": hashear_password(reg_pass),
+                            "fecha_nacimiento": reg_nacimiento.strftime("%Y-%m-%d"),
+                            "peso": reg_peso,
+                            "altura": reg_altura,
+                            "deporte": reg_deporte,
+                            "objetivo": reg_obj,
+                            "estado": "pendiente"
+                        }).execute()
+                        st.success(f"🎉 ¡Registro enviado, {reg_nombre}! Quedó pendiente de aprobación.")
+                    except Exception: st.error("❌ El usuario o nombre ya se encuentran registrados.")
     st.stop()
 
 st.sidebar.markdown(f"👤 Coach: **{st.session_state['usuario_actual']}**")
 
 if st.session_state["rol_actual"] == "atleta":
     mes_actual_str = datetime.now().strftime("%m-%Y")
-    cursor.execute("SELECT COUNT(*) FROM asistencia WHERE alumno = ? AND mes_ano = ?", (st.session_state["usuario_actual"], mes_actual_str))
-    racha_act = cursor.fetchone()[0]
+    res_asist = supabase.table("asistencia").select("id", count="exact").eq("alumno", st.session_state["usuario_actual"]).eq("mes_ano", mes_actual_str).execute()
+    racha_act = res_asist.count if res_asist.count is not None else len(res_asist.data)
     st.sidebar.markdown(f"📆 Asistencias este mes: **{racha_act}**")
 
 if st.sidebar.button("🔒 Cerrar Sesión"):
@@ -240,8 +193,9 @@ if st.sidebar.button("🔒 Cerrar Sesión"):
     st.session_state["borrador_rutina"] = []
     st.rerun()
 
-cursor.execute("SELECT nombre_apellido FROM alumnos WHERE estado = 'aprobado' ORDER BY nombre_apellido ASC")
-lista_alumnos = [fila[0] for fila in cursor.fetchall()]
+# Lista de Alumnos Aprobados
+res_aprob = supabase.table("alumnos").select("nombre_apellido").eq("estado", "aprobado").order("nombre_apellido").execute()
+lista_alumnos = [f["nombre_apellido"] for f in res_aprob.data]
 lista_alumnos_con_neutro = ["- Seleccionar Atleta -"] + lista_alumnos
 
 # ==========================================
@@ -250,19 +204,15 @@ lista_alumnos_con_neutro = ["- Seleccionar Atleta -"] + lista_alumnos
 def renderizar_tabla_entrenamiento(nombre_atleta, es_espejo=False):
     sufijo = "esp" if es_espejo else "atl"
     
-    cursor.execute("""
-        SELECT r.ejercicio, r.bloque, r.series_objetivo, r.reps_objetivo, b.link_video, r.nombre_rutina 
-        FROM rutinas_asignadas r
-        LEFT JOIN biblioteca_ejercicios b ON r.ejercicio = b.nombre
-        WHERE r.alumno = ?
-    """, (nombre_atleta,))
-    rutina_completa = cursor.fetchall()
+    # Traemos rutina y cruzamos link_video de biblioteca
+    res_rut = supabase.table("rutinas_asignadas").select("*").eq("alumno", nombre_atleta).execute()
+    rutina_completa = res_rut.data
     
     if not rutina_completa:
         st.info("No tenés ninguna rutina asignada para este mes todavía.")
         return
         
-    nombre_de_la_rutina = rutina_completa[0][5] or "Planificación Mensual"
+    nombre_de_la_rutina = rutina_completa[0]["nombre_rutina"] or "Planificación Mensual"
     if es_espejo: st.warning(f"👀 MODO ESPEJO. Planificación: **{nombre_de_la_rutina}**")
     else: st.markdown(f"### 📋 Plan Mensual: <span style='color: #CCFF00;'>{nombre_de_la_rutina}</span>", unsafe_allow_html=True)
     
@@ -275,17 +225,20 @@ def renderizar_tabla_entrenamiento(nombre_atleta, es_espejo=False):
     
     for sub_b in SUB_BLOQUES:
         llave_busqueda = f"{dia_a_entrenar}|{sub_b}"
-        ejercicios_del_bloque = [r for r in rutina_completa if r[1] == llave_busqueda]
+        ejercicios_del_bloque = [r for r in rutina_completa if r["bloque"] == llave_busqueda]
         
         if ejercicios_del_bloque:
             ejercicios_visibles_en_pantalla = True
             st.markdown(f"<h4 style='color: #CCFF00; margin-top: 20px; background-color: #1E293B; padding: 6px 10px; border-radius: 4px;'>{sub_b}</h4>", unsafe_allow_html=True)
             
             for idx, ej in enumerate(ejercicios_del_bloque):
-                nombre_ejercicio = ej[0]
-                series_prescritas = int(ej[2])
-                reps_prescritas = ej[3]
-                link_video = ej[4]
+                nombre_ejercicio = ej["ejercicio"]
+                series_prescritas = int(ej["series_objetivo"])
+                reps_prescritas = ej["reps_objetivo"]
+                
+                # Buscar link de video en biblioteca
+                res_v = supabase.table("biblioteca_ejercicios").select("link_video").eq("nombre", nombre_ejercicio).execute()
+                link_video = res_v.data[0]["link_video"] if res_v.data else ""
                 
                 with st.container():
                     col_t1, col_t2 = st.columns([3, 1])
@@ -307,7 +260,7 @@ def renderizar_tabla_entrenamiento(nombre_atleta, es_espejo=False):
                             "ejercicio": nombre_ejercicio, "serie": s, "kilos": kilos_input, "reps_reales": reps_reales
                         }
                     
-                    # 🛠️ CORRECCIÓN DE KEY DUPLICADA: ID 100% Único por Ejercicio, Índice y Estructura temporal
+                    # Identificador único de comentarios
                     nombre_ej_limpio = nombre_ejercicio.replace(" ", "_").replace("[", "").replace("]", "").replace("-", "")
                     dia_limpio = dia_a_entrenar.replace(" ", "_").replace("📅", "").replace("🏃", "")
                     sub_b_limpio = sub_b.replace(" ", "_").replace("🔥", "").replace("⚡", "").replace("🧘", "")
@@ -334,8 +287,8 @@ def renderizar_tabla_entrenamiento(nombre_atleta, es_espejo=False):
         if es_espejo: st.info("ℹ️ Modo espejo de visualización.")
         else:
             fecha_hoy_texto = datetime.now().strftime("%Y-%m-%d")
-            cursor.execute("SELECT COUNT(*) FROM registros_entrenamiento WHERE alumno = ? AND fecha LIKE ?", (nombre_atleta, f"{fecha_hoy_texto}%"))
-            if cursor.fetchone()[0] > 0: st.error(f"⚠️ Ya registraste una sesión hoy.")
+            res_comp = supabase.table("registros_entrenamiento").select("id").eq("alumno", nombre_atleta).like("fecha", f"{fecha_hoy_texto}%").execute()
+            if res_comp.data: st.error(f"⚠️ Ya registraste una sesión hoy.")
             else:
                 datos_validos = [d for d in entradas_alumno.values() if d["kilos"] > 0 or d["reps_reales"] > 0]
                 if not datos_validos: st.warning("⚠️ Completá marcas antes de guardar.")
@@ -345,20 +298,31 @@ def renderizar_tabla_entrenamiento(nombre_atleta, es_espejo=False):
                     nombre_reporte_dia = f"{nombre_de_la_rutina} ({dia_a_entrenar})"
                     
                     for datos in datos_validos:
-                        cursor.execute("""
-                            INSERT INTO registros_entrenamiento 
-                            (fecha, alumno, nombre_rutina, ejercicio, nro_serie, kilos, reps_reales, rpe_serie, notas, rpe_global_sesion, duracion_minutos) 
-                            VALUES (?, ?, ?, ?, ?, ?, ?, 0.0, ?, ?, ?)
-                        """, (fecha_actual, nombre_atleta, nombre_reporte_dia, datos["ejercicio"], datos["serie"], datos["kilos"], datos["reps_reales"], datos["notes_field"], rpe_global, duracion_min))
+                        supabase.table("registros_entrenamiento").insert({
+                            "fecha": fecha_actual,
+                            "alumno": nombre_atleta,
+                            "nombre_rutina": nombre_reporte_dia,
+                            "ejercicio": datos["ejercicio"],
+                            "nro_serie": datos["serie"],
+                            "kilos": datos["kilos"],
+                            "reps_reales": datos["reps_reales"],
+                            "rpe_serie": 0.0,
+                            "notas": datos["notes_field"],
+                            "rpe_global_sesion": rpe_global,
+                            "duracion_minutos": duracion_min
+                        }).execute()
                     
-                    cursor.execute("INSERT INTO asistencia (fecha, mes_ano, alumno) VALUES (?, ?, ?)", (fecha_hoy_texto, mes_ano_actual, nombre_atleta))
-                    conn.commit()
+                    supabase.table("asistencia").insert({
+                        "fecha": fecha_hoy_texto,
+                        "mes_ano": mes_ano_actual,
+                        "alumno": nombre_atleta
+                    }).execute()
                     
-                    cursor.execute("SELECT COUNT(*) FROM asistencia WHERE alumno = ? AND mes_ano = ?", (nombre_atleta, mes_ano_actual))
-                    total_dias = cursor.fetchone()[0]
+                    res_tot = supabase.table("asistencia").select("id", count="exact").eq("alumno", nombre_atleta).eq("mes_ano", mes_ano_actual).execute()
+                    total_dias = res_tot.count if res_tot.count is not None else len(res_tot.data)
                     
                     st.session_state["mensaje_motivacional_pop"] = obtener_frase_motivacional(total_dias)
-                    st.success("🚀 ¡Entrenamiento enviado correctamente al Profe Giuliano!")
+                    st.success("🚀 ¡Entrenamiento enviado correctamente al Profe!")
                     st.rerun()
 
 if "mensaje_motivacional_pop" in st.session_state:
@@ -368,7 +332,7 @@ if "mensaje_motivacional_pop" in st.session_state:
     del st.session_state["mensaje_motivacional_pop"]
 
 # ==========================================
-# 🚀 PANTALLAS DEL ROL
+# 🚀 PANTALLAS SEGÚN ROL
 # ==========================================
 if st.session_state["rol_actual"] == "atleta":
     alumno_logueado = st.session_state["usuario_actual"]
@@ -376,9 +340,14 @@ if st.session_state["rol_actual"] == "atleta":
     tab_entrenar, tab_progreso = st.tabs(["🏋️‍♂️ Mi Sesión", "📈 Mi Historial"])
     with tab_entrenar: renderizar_tabla_entrenamiento(alumno_logueado, es_espejo=False)
     with tab_progreso:
-        df_hist_atleta = pd.read_sql_query("SELECT fecha, nombre_rutina, ejercicio, nro_serie, kilos, reps_reales, notas FROM registros_entrenamiento WHERE alumno = ? ORDER BY id DESC", conn, params=(alumno_logueado,))
-        if df_hist_atleta.empty: st.info("Aún no registrás entrenamientos.")
-        else: st.dataframe(df_hist_atleta.rename(columns={"nombre_rutina": "Plan / Día", "fecha":"Fecha", "ejercicio":"Ejercicio", "nro_serie":"Serie", "kilos":"Kilos", "reps_reales":"Reps", "notas":"Notas"}), use_container_width=True, hide_index=True)
+        res_hist = supabase.table("registros_entrenamiento").select("fecha, nombre_rutina, ejercicio, nro_serie, kilos, reps_reales, notas").eq("alumno", alumno_logueado).order("id", desc=True).execute()
+        if not res_hist.data: st.info("Aún no registrás entrenamientos.")
+        else:
+            df_hist = pd.DataFrame(res_hist.data)
+            st.dataframe(df_hist.rename(columns={
+                "nombre_rutina": "Plan / Día", "fecha":"Fecha", "ejercicio":"Ejercicio", 
+                "nro_serie":"Serie", "kilos":"Kilos", "reps_reales":"Reps", "notas":"Notas"
+            }), use_container_width=True, hide_index=True)
 
 elif st.session_state["rol_actual"] == "admin":
     tab_dashboard, tab_rutinas, tab_clonar, tab_fichas, tab_aprobaciones, tab_excel = st.tabs([
@@ -390,32 +359,35 @@ elif st.session_state["rol_actual"] == "admin":
         
         mes_ano_actual = datetime.now().strftime("%m-%Y")
         st.markdown(f"#### 📅 Control de Asistencia Mensual ({mes_ano_actual})")
-        df_asist_resumen = pd.read_sql_query("""
-            SELECT alumno as 'Atleta', COUNT(*) as 'Días Entrenados' 
-            FROM asistencia 
-            WHERE mes_ano = ? 
-            GROUP BY alumno 
-            ORDER BY COUNT(*) DESC
-        """, conn, params=(mes_ano_actual,))
         
-        if df_asist_resumen.empty: st.info("Ningún atleta registró asistencia todavía este mes.")
-        else: st.dataframe(df_asist_resumen, use_container_width=True, hide_index=True)
+        # Simulación de GROUP BY con lectura limpia
+        res_asist_m = supabase.table("asistencia").select("alumno").eq("mes_ano", mes_ano_actual).execute()
+        if not res_asist_m.data:
+            st.info("Ningún atleta registró asistencia todavía este mes.")
+        else:
+            df_asist_resumen = pd.DataFrame(res_asist_m.data)["alumno"].value_counts().reset_index()
+            df_asist_resumen.columns = ["Atleta", "Días Entrenados"]
+            st.dataframe(df_asist_resumen, use_container_width=True, hide_index=True)
         st.divider()
         
         fecha_actual_hoy = datetime.now().strftime("%Y-%m-%d")
-        df_alertas = pd.read_sql_query("SELECT alumno, ejercicio, notas FROM registros_entrenamiento WHERE fecha LIKE ? AND (notas LIKE '%dolor%' OR notas LIKE '%molestia%' OR notas LIKE '%tiron%' OR notas LIKE '%molesto%')", conn, params=(f"{fecha_actual_hoy}%",))
-        if not df_alertas.empty:
+        res_alertas = supabase.table("registros_entrenamiento").select("alumno, ejercicio, notas").like("fecha", f"{fecha_actual_hoy}%").execute()
+        
+        df_alertas_list = [r for r in res_alertas.data if any(palabra in str(r["notas"]).lower() for palabra in ["dolor", "molestia", "tiron", "molesto"])]
+        if df_alertas_list:
             st.markdown("#### ⚠️ SEMÁFORO DE ALERTAS CLÍNICAS (HOY)")
-            for _, al_row in df_alertas.iterrows():
-                st.warning(f"🚨 **{al_row['alumno']}** reportó problemas en **{al_row['ejercicio']}**: *\"{al_row['notes_field'] if 'notes_field' in al_row else al_row['notas']}\"*")
+            for al_row in df_alertas_list:
+                st.warning(f"🚨 **{al_row['alumno']}** reportó problemas en **{al_row['ejercicio']}**: *\"{al_row['notas']}\"*")
             st.divider()
 
         alumno_a_revisar = st.selectbox("👤 Seleccionar Atleta para auditar series:", lista_alumnos_con_neutro, key="sb_hist_admin")
-        if alumno_a_revisar == "- Seleccionar Atleta -": st.info("💡 Elegí un atleta para revisar el desglose específico de sus cargas.")
+        if alumno_a_revisar == "- Seleccionar Atleta -":
+            st.info("💡 Elegí un atleta para revisar el desglose específico de sus cargas.")
         else:
-            df_total_alumno = pd.read_sql_query("SELECT id, fecha, nombre_rutina, ejercicio, nro_serie, kilos, reps_reales, notas, rpe_global_sesion, duracion_minutos FROM registros_entrenamiento WHERE alumno = ? ORDER BY id DESC", conn, params=(alumno_a_revisar,))
-            if df_total_alumno.empty: st.warning(f"Sin entrenamientos guardados para {alumno_a_revisar}.")
+            res_total_al = supabase.table("registros_entrenamiento").select("*").eq("alumno", alumno_a_revisar).order("id", desc=True).execute()
+            if not res_total_al.data: st.warning(f"Sin entrenamientos guardados para {alumno_a_revisar}.")
             else:
+                df_total_alumno = pd.DataFrame(res_total_al.data)
                 for fecha_sesion in df_total_alumno["fecha"].unique():
                     df_sesion_especifica = df_total_alumno[df_total_alumno["fecha"] == fecha_sesion]
                     r_name = df_sesion_especifica.iloc[0]["nombre_rutina"] or "Plan General"
@@ -423,12 +395,14 @@ elif st.session_state["rol_actual"] == "admin":
                     dur_m = df_sesion_especifica.iloc[0]["duracion_minutos"] or 60
                     
                     with st.expander(f"🏋️‍♂️ {r_name} — {fecha_sesion} | 📊 sRPE Carga: {int(rpe_g)*int(dur_m)} (RPE {rpe_g} x {dur_m} min)"):
-                        st.dataframe(df_sesion_especifica[["ejercicio", "nro_serie", "kilos", "reps_reales", "notas"]].rename(columns={"ejercicio": "Ejercicio", "nro_serie": "Serie", "kilos": "Kilos", "reps_reales": "Reps Reales", "notas": "Notas Atleta"}), use_container_width=True, hide_index=True)
+                        st.dataframe(df_sesion_especifica[["ejercicio", "nro_serie", "kilos", "reps_reales", "notas"]].rename(columns={
+                            "ejercicio": "Ejercicio", "nro_serie": "Serie", "kilos": "Kilos", "reps_reales": "Reps Reales", "notas": "Notas Atleta"
+                        }), use_container_width=True, hide_index=True)
+                        
                         if st.button("🗑️ Eliminar Sesión", key=f"del_{fecha_sesion.replace(' ', '_').replace(':', '_')}"):
                             solo_fecha_dia = fecha_sesion.split(" ")[0]
-                            cursor.execute("DELETE FROM registros_entrenamiento WHERE alumno = ? AND fecha = ?", (alumno_a_revisar, fecha_sesion))
-                            cursor.execute("DELETE FROM asistencia WHERE alumno = ? AND fecha = ?", (alumno_a_revisar, solo_fecha_dia))
-                            conn.commit()
+                            supabase.table("registros_entrenamiento").delete().eq("alumno", alumno_a_revisar).eq("fecha", fecha_sesion).execute()
+                            supabase.table("asistencia").delete().eq("alumno", alumno_a_revisar).eq("fecha", solo_fecha_dia).execute()
                             st.rerun()
 
     with tab_rutinas:
@@ -439,10 +413,9 @@ elif st.session_state["rol_actual"] == "admin":
             st.info("💡 Elegí un atleta de la lista para empezar a construir la sesión.")
             st.session_state["borrador_rutina"] = []
         else:
-            cursor.execute("SELECT nombre_rutina FROM rutinas_asignadas WHERE alumno = ? LIMIT 1", (alumno_rutina,))
-            rutina_existente = cursor.fetchone()
-            valor_sugerido_nombre = rutina_existente[0] if (rutina_existente and rutina_existente[0]) else ""
-            nombre_de_la_rutina = st.text_input("🏷️ Bloque / Nombre del Mesociclo (Ej: Planificación Julio - Fuerza):", value=valor_sugerido_nombre)
+            res_nom = supabase.table("rutinas_asignadas").select("nombre_rutina").eq("alumno", alumno_rutina).limit(1).execute()
+            valor_sugerido_nombre = res_nom.data[0]["nombre_rutina"] if res_nom.data else ""
+            nombre_de_la_rutina = st.text_input("🏷️ Bloque / Nombre del Mesociclo:", value=valor_sugerido_nombre)
             
             st.divider()
             col_p1, col_p2 = st.columns(2)
@@ -456,24 +429,24 @@ elif st.session_state["rol_actual"] == "admin":
             
             ejercicio_final = ""
             if tipo_carga == "🔍 Buscar en Biblioteca por Patrón":
-                cursor.execute("SELECT DISTINCT grupo_muscular FROM biblioteca_ejercicios WHERE grupo_muscular IS NOT NULL AND grupo_muscular != '' ORDER BY grupo_muscular ASC")
-                patrones_disponibles = [p[0] for p in cursor.fetchall()]
+                res_pat = supabase.table("biblioteca_ejercicios").select("grupo_muscular").execute()
+                patrones_disponibles = sorted(list(set([p["grupo_muscular"] for p in res_pat.data if p["grupo_muscular"]])))
                 
                 if patrones_disponibles:
                     patron_seleccionado = st.selectbox("Filtrar por patrón de movimiento:", ["- Todos los patrones -"] + patrones_disponibles)
                     if patron_seleccionado == "- Todos los patrones -":
-                        cursor.execute("SELECT nombre FROM biblioteca_ejercicios ORDER BY nombre ASC")
+                        res_ejs = supabase.table("biblioteca_ejercicios").select("nombre").order("nombre").execute()
                     else:
-                        cursor.execute("SELECT nombre FROM biblioteca_ejercicios WHERE grupo_muscular = ? ORDER BY nombre ASC", (patron_seleccionado,))
+                        res_ejs = supabase.table("biblioteca_ejercicios").select("nombre").eq("grupo_muscular", patron_seleccionado).order("nombre").execute()
                 else:
                     st.info("💡 Tu biblioteca está vacía. Podés usar el ingreso manual o cargar el Excel en la pestaña 'Biblioteca'.")
-                    cursor.execute("SELECT nombre FROM biblioteca_ejercicios ORDER BY nombre ASC")
+                    res_ejs = supabase.table("biblioteca_ejercicios").select("nombre").order("nombre").execute()
                     
-                ejercicios_filtrados = [fila[0] for fila in cursor.fetchall()]
+                ejercicios_filtrados = [fila["nombre"] for fila in res_ejs.data]
                 if ejercicios_filtrados: ejercicio_final = st.selectbox("Seleccionar Ejercicio:", ejercicios_filtrados)
-                else: ejercicio_final = st.text_input("No hay ejercicios en este patrón. Escribilo acá:")
+                else: ejercicio_final = st.text_input("No hay ejercicios. Escribilo acá:")
             else:
-                ejercicio_final = st.text_input("Escribí el ejercicio o trabajo aeróbico/libre:", placeholder="Ej: Pasadas 400m / Intervalado / Sentadilla Libre")
+                ejercicio_final = st.text_input("Escribí el ejercicio o trabajo aeróbico/libre:", placeholder="Ej: Pasadas 400m / Sentadilla Libre")
 
             col_r1, col_r2 = st.columns(2)
             with col_r1: series_obj = st.number_input("Series prescritas:", min_value=1, max_value=20, value=4)
@@ -499,36 +472,39 @@ elif st.session_state["rol_actual"] == "admin":
                         st.rerun()
                 with col_b2:
                     if st.button("💾 PUBLICAR Y ENVIAR PLANIFICACIÓN AL ATLETA", use_container_width=True, type="primary"):
-                        cursor.execute("DELETE FROM rutinas_asignadas WHERE alumno = ?", (alumno_rutina,))
+                        supabase.table("rutinas_asignadas").delete().eq("alumno", alumno_rutina).execute()
                         fecha_hoy = datetime.now().strftime("%Y-%m-%d")
                         for item in st.session_state["borrador_rutina"]:
-                            cursor.execute("""
-                                INSERT INTO rutinas_asignadas (alumno, nombre_rutina, ejercicio, bloque, series_objetivo, reps_objetivo, fecha_asignacion) 
-                                VALUES (?, ?, ?, ?, ?, ?, ?)
-                            """, (alumno_rutina, nombre_de_la_rutina.strip(), item["ejercicio"], item["bloque"], item["series"], item["reps"], fecha_hoy))
-                        conn.commit()
+                            supabase.table("rutinas_asignadas").insert({
+                                "alumno": alumno_rutina,
+                                "nombre_rutina": nombre_de_la_rutina.strip(),
+                                "ejercicio": item["ejercicio"],
+                                "bloque": item["bloque"],
+                                "series_objetivo": item["series"],
+                                "reps_objetivo": item["reps"],
+                                "fecha_asignacion": fecha_hoy
+                            }).execute()
                         st.session_state["borrador_rutina"] = []
                         st.success(f"🎉 ¡Planificación publicada con éxito para **{alumno_rutina}**!")
                         st.rerun()
             
             st.divider()
-            cursor.execute("SELECT id, ejercicio, bloque, series_objetivo, reps_objetivo FROM rutinas_asignadas WHERE alumno = ?", (alumno_rutina,))
-            ejercicios_actuales = cursor.fetchall()
+            res_act = supabase.table("rutinas_asignadas").select("id, ejercicio, bloque, series_objetivo, reps_objetivo").eq("alumno", alumno_rutina).execute()
+            ejercicios_actuales = res_act.data
             if ejercicios_actuales:
                 st.markdown(f"#### 📅 Planificación activa en el celular del Atleta")
                 for d_op in DIAS_PLANIF:
-                    ejercicios_del_dia = [e for e in ejercicios_actuales if e[2].startswith(d_op)]
+                    ejercicios_del_dia = [e for e in ejercicios_actuales if e["bloque"].startswith(d_op)]
                     if ejercicios_del_dia:
                         st.markdown(f"<h5 style='color: #84CC16; margin-top: 10px;'>{d_op}</h5>", unsafe_allow_html=True)
                         for sb_op in SUB_BLOQUES:
                             llave_comp = f"{d_op}|{sb_op}"
-                            items_b = [e for e in ejercicios_del_dia if e[2] == llave_comp]
+                            items_b = [e for e in ejercicios_del_dia if e["bloque"] == llave_comp]
                             if items_b:
                                 st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;**{sb_op}**")
-                                for item in items_b: st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└─ {item[1]} ({item[3]}x{item[4]})")
+                                for item in items_b: st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└─ {item['ejercicio']} ({item['series_objetivo']}x{item['reps_objetivo']})")
                 if st.button("🗑️ Desactivar / Borrar Plan de la base de datos"):
-                    cursor.execute("DELETE FROM rutinas_asignadas WHERE alumno = ?", (alumno_rutina,))
-                    conn.commit()
+                    supabase.table("rutinas_asignadas").delete().eq("alumno", alumno_rutina).execute()
                     st.rerun()
 
     with tab_clonar:
@@ -539,21 +515,36 @@ elif st.session_state["rol_actual"] == "admin":
         if st.button("⚡ CLONAR RUTINA COMPLETA", use_container_width=True, type="primary"):
             if atleta_origen == "- Seleccionar Atleta -" or atleta_destino == "- Seleccionar Atleta -": st.error("Seleccioná ambos.")
             else:
-                cursor.execute("SELECT nombre_rutina, ejercicio, bloque, series_objetivo, reps_objetivo FROM rutinas_asignadas WHERE alumno = ?", (atleta_origen,))
-                origen_datos = cursor.fetchall()
+                res_orig = supabase.table("rutinas_asignadas").select("*").eq("alumno", atleta_origen).execute()
+                origen_datos = res_orig.data
                 if origen_datos:
-                    cursor.execute("DELETE FROM rutinas_asignadas WHERE alumno = ?", (atleta_destino,))
+                    supabase.table("rutinas_asignadas").delete().eq("alumno", atleta_destino).execute()
+                    fecha_hoy = datetime.now().strftime("%Y-%m-%d")
                     for f_rut in origen_datos:
-                        cursor.execute("INSERT INTO rutinas_asignadas (alumno, nombre_rutina, ejercicio, bloque, series_objetivo, reps_objetivo, fecha_asignacion) VALUES (?, ?, ?, ?, ?, ?, ?)", (atleta_destino, f_rut[0], f_rut[1], f_rut[2], f_rut[3], f_rut[4], datetime.now().strftime("%Y-%m-%d")))
-                    conn.commit()
+                        supabase.table("rutinas_asignadas").insert({
+                            "alumno": atleta_destino,
+                            "nombre_rutina": f_rut["nombre_rutina"],
+                            "ejercicio": f_rut["ejercicio"],
+                            "bloque": f_rut["bloque"],
+                            "series_objetivo": f_rut["series_objetivo"],
+                            "reps_objetivo": f_rut["reps_objetivo"],
+                            "fecha_asignacion": fecha_hoy
+                        }).execute()
                     st.success("🎉 ¡Pizarra copiada completa!")
                     st.rerun()
 
     with tab_fichas:
         st.markdown("### 📋 Fichas Clínicas")
-        cursor.execute("SELECT nombre_apellido, usuario, fecha_nacimiento, peso, altura, deporte, objetivo FROM alumnos WHERE estado = 'aprobado' ORDER BY nombre_apellido ASC")
-        for al_fila in cursor.fetchall():
-            n_c, u_a, f_n, p_k, a_m, d_e, o_f = al_fila
+        res_cli = supabase.table("alumnos").select("*").eq("estado", "aprobado").order("nombre_apellido").execute()
+        for al_fila in res_cli.data:
+            n_c = al_fila["nombre_apellido"]
+            u_a = al_fila["usuario"]
+            f_n = al_fila["fecha_nacimiento"]
+            p_k = al_fila["peso"]
+            a_m = al_fila["altura"]
+            d_e = al_fila["deporte"]
+            o_f = al_fila["objetivo"]
+            
             with st.expander(f"👤 {n_c} | Deporte: {d_e} | Edad: {calcular_edad(f_n)} años"):
                 st.text(f"• Usuario: {u_a}  • Peso: {p_k} kg  • Altura: {a_m} m\n• Foco: {o_f}")
                 if st.checkbox("✍️ Editar Ficha", key=f"chk_{n_c.replace(' ','_')}"):
@@ -564,35 +555,48 @@ elif st.session_state["rol_actual"] == "admin":
                         nuevo_alt = st.number_input("Altura:", value=float(a_m))
                         nuevo_obj = st.text_area("Objetivo:", value=o_f)
                         if st.form_submit_button("💾 Guardar"):
-                            cursor.execute("UPDATE alumnos SET usuario=?, peso=?, altura=?, deporte=?, objetivo=? WHERE nombre_apellido=?", (nuevo_user, nuevo_peso, nuevo_alt, nuevo_dep, nuevo_obj, n_c))
-                            conn.commit()
+                            supabase.table("alumnos").update({
+                                "usuario": nuevo_user,
+                                "peso": nuevo_peso,
+                                "altura": nuevo_alt,
+                                "deporte": nuevo_dep,
+                                "objetivo": nuevo_obj
+                            }).eq("nombre_apellido", n_c).execute()
                             st.rerun()
 
     with tab_aprobaciones:
         st.markdown("### 👥 Solicitudes de Autoregistro Pendientes")
-        cursor.execute("SELECT id, nombre_apellido, usuario, deporte, objetivo FROM alumnos WHERE estado = 'pendiente' ORDER BY id ASC")
-        pendientes = cursor.fetchall()
+        res_pend = supabase.table("alumnos").select("id, nombre_apellido, usuario, deporte, objetivo").eq("estado", "pendiente").order("id").execute()
+        pendientes = res_pend.data
         if not pendientes: st.info("No hay solicitudes pendientes.")
         else:
             for p_atleta in pendientes:
-                p_id, p_nom, p_user, p_dep, p_obj = p_atleta
+                p_id = p_atleta["id"]
+                p_nom = p_atleta["nombre_apellido"]
+                p_user = p_atleta["usuario"]
                 with st.container():
                     st.markdown(f"**👤 Atleta:** `{p_nom}` | **Usuario:** `{p_user}`")
                     col_ap1, col_ap2, _ = st.columns([1, 1, 3])
                     with col_ap1:
                         if st.button("✅ APROBAR", key=f"ap_{p_id}"):
-                            cursor.execute("UPDATE alumnos SET estado = 'aprobado' WHERE id = ?", (p_id,))
-                            conn.commit()
+                            supabase.table("alumnos").update({"estado": "aprobado"}).eq("id", p_id).execute()
                             st.rerun()
                     with col_ap2:
                         if st.button("❌ RECHAZAR", key=f"re_{p_id}", type="primary"):
-                            cursor.execute("DELETE FROM alumnos WHERE id = ?", (p_id,))
-                            conn.commit()
+                            supabase.table("alumnos").delete().eq("id", p_id).execute()
                             st.rerun()
 
-    # 📚 EXCEL CON OBSERVACIÓN INLINE DE LA COLUMNA grupo_muscular
     with tab_excel:
         st.markdown("### 📚 Importar Biblioteca de Ejercicios (.xlsx / .csv)")
+        
+        st.warning("⚠️ Si querés reiniciar de cero tu biblioteca actual en la nube de Supabase antes de cargar el archivo, tocá el botón rojo de abajo:")
+        if st.button("🗑️ VACIAR BIBLIOTECA EN SUPABASE", use_container_width=True, type="secondary"):
+            # Borrado simple por API
+            supabase.table("biblioteca_ejercicios").delete().neq("id", 0).execute()
+            st.success("✨ ¡Biblioteca vaciada con éxito!")
+            st.rerun()
+            
+        st.divider()
         archivo_subido = st.file_uploader("Arrastrá tu archivo excel o csv con los ejercicios:", type=["xlsx", "csv"])
         
         if archivo_subido is not None:
@@ -618,9 +622,15 @@ elif st.session_state["rol_actual"] == "admin":
                             g_val = str(fila[col_grupo]).strip() if (col_grupo and str(fila[col_grupo]).strip().lower() != "nan") else "General"
                             v_val = str(fila[col_video]).strip() if (col_video and str(fila[col_video]).strip().lower() != "nan") else ""
                             
-                            cursor.execute("INSERT OR IGNORE INTO biblioteca_ejercicios (nombre, grupo_muscular, link_video) VALUES (?, ?, ?)", (n_val, g_val, v_val))
-                            contador_insertados += 1
-                        conn.commit()
+                            # Evitamos duplicados por nombre
+                            res_dup = supabase.table("biblioteca_ejercicios").select("id").eq("nombre", n_val).execute()
+                            if not res_dup.data:
+                                supabase.table("biblioteca_ejercicios").insert({
+                                    "nombre": n_val,
+                                    "grupo_muscular": g_val,
+                                    "link_video": v_val
+                                }).execute()
+                                contador_insertados += 1
                         st.success(f"🎉 ¡Procesados {contador_insertados} ejercicios correctamente!")
                         st.rerun()
             except Exception as e: st.error(f"❌ Error al procesar archivo: {e}")
