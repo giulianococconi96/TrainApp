@@ -3,6 +3,7 @@ from supabase import create_client, Client
 import pandas as pd
 import bcrypt
 import random
+import time
 from datetime import datetime, date
 
 # ==========================================
@@ -12,7 +13,6 @@ try:
     SUPABASE_URL = st.secrets["supabase_url"]
     SUPABASE_KEY = st.secrets["supabase_key"]
 except Exception:
-    # Fallback local o por si no lee los secrets temporalmente
     SUPABASE_URL = "https://ogaoizovgrfabvmxyuee.supabase.co"
     SUPABASE_KEY = "sb_publishable_SwDaoOYxxdl2oCm_c04S3w_Wf09EGl2"
 
@@ -65,6 +65,33 @@ def obtener_frase_motivacional(dias_acumulados):
     return random.choice(frases)
 
 # ==========================================
+# 📸 HELPER PARA SUBIR IMAGEN A SUPABASE STORAGE
+# ==========================================
+def subir_foto_perfil(archivo_imagen, usuario_slug) -> str:
+    """Sube la imagen al Storage de Supabase y retorna la URL pública."""
+    try:
+        # Generamos un nombre único usando el usuario y la extensión
+        extension = archivo_imagen.name.split(".")[-1]
+        nombre_archivo = f"{usuario_slug}_{int(time.time())}.{extension}"
+        
+        # Leemos los bytes de la imagen subida
+        bytes_datos = archivo_imagen.getvalue()
+        
+        # Subimos el archivo al bucket 'fotos_perfil'
+        supabase.storage.from_("fotos_perfil").upload(
+            path=nombre_archivo,
+            file=bytes_datos,
+            file_options={"content-type": f"image/{extension}"}
+        )
+        
+        # Obtenemos la URL pública para renderizarla
+        url_publica = supabase.storage.from_("fotos_perfil").get_public_url(nombre_archivo)
+        return url_publica
+    except Exception as e:
+        st.error(f"⚠️ Error al subir la imagen a Supabase Storage: {e}")
+        return None
+
+# ==========================================
 # 0. CONSTANTES GLOBALES Y SESIÓN BORRADOR
 # ==========================================
 DIAS_PLANIF = ["📅 Día 1", "📅 Día 2", "🏃 Día Aeróbico"]
@@ -78,13 +105,13 @@ if "borrador_rutina" not in st.session_state:
 # ==========================================
 ADMIN_USER = "giuliano"
 ADMIN_PASS_PLANA = "magpower2026"
+AVATAR_PREDETERMINADO = "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&q=80&w=200&h=200"
 
 # ==========================================
 # 2. CONFIGURACIÓN VISUAL GENERAL (UI)
 # ==========================================
 st.set_page_config(page_title="TrainApp - Prof. Giuliano Cocconi", page_icon="⚡", layout="wide")
 
-# Estilos CSS específicos para compactar la visualización móvil horizontal
 st.markdown("""
 <style>
     div[data-testid="column"] {
@@ -96,6 +123,11 @@ st.markdown("""
     .block-container {
         padding-top: 1.5rem !important;
         padding-bottom: 1.5rem !important;
+    }
+    .profile-pic {
+        border-radius: 50%;
+        object-fit: cover;
+        border: 3px solid #84CC16;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -124,14 +156,12 @@ if not st.session_state["autenticado"]:
                 input_pass = st.text_input("Contraseña:", type="password")
                 btn_login = st.form_submit_button("Entrar al Sistema 🚀", use_container_width=True)
             if btn_login:
-                # Verificación directa de administrador (Fuerza Bruta)
                 if input_user == ADMIN_USER and input_pass == ADMIN_PASS_PLANA:
                     st.session_state["autenticado"] = True
                     st.session_state["usuario_actual"] = "Prof. Giuliano"
                     st.session_state["rol_actual"] = "admin"
                     st.rerun()
                 else:
-                    # Si no es admin, busca en Supabase si es un atleta
                     res = supabase.table("alumnos").select("nombre_apellido, contrasena, estado").eq("usuario", input_user).execute()
                     user_db = res.data
                     if user_db and verificar_password(input_pass, user_db[0]["contrasena"]):
@@ -148,29 +178,42 @@ if not st.session_state["autenticado"]:
         st.markdown("<h3 style='text-align: center;'>📝 Registro de Atleta</h3>", unsafe_allow_html=True)
         col_r1, col_r2, col_r3 = st.columns([1, 2, 1])
         with col_r2:
-            with st.form("autoregistro_alumno", clear_on_submit=True):
-                reg_nombre = st.text_input("Nombre y Apellido completo:")
-                reg_user = st.text_input("Nombre de Usuario (para ingresar):").strip().lower()
-                reg_pass = st.text_input("Contraseña de Acceso:", type="password")
-                reg_nacimiento = st.date_input("Fecha de Nacimiento:", value=date(2000, 1, 1))
-                reg_peso = st.number_input("Peso Actual (kg):", min_value=1.0, value=70.0)
-                reg_altura = st.number_input("Altura Actual (m):", min_value=0.5, value=1.75)
-                reg_deporte = st.text_input("Deporte / Disciplina:")
-                reg_obj = st.text_area("Objetivo principal:")
-                btn_reg_submit = st.form_submit_button("Enviar Registro 👤", use_container_width=True)
+            # Quitamos el form completo de Streamlit para el autoregistro para poder procesar la foto dinámicamente sin fallos del file_uploader
+            reg_nombre = st.text_input("Nombre y Apellido completo:")
+            reg_user = st.text_input("Nombre de Usuario (para ingresar):").strip().lower()
+            reg_pass = st.text_input("Contraseña de Acceso:", type="password")
+            reg_nacimiento = st.date_input("Fecha de Nacimiento:", value=date(2000, 1, 1))
+            reg_peso = st.number_input("Peso Actual (kg):", min_value=1.0, value=70.0)
+            reg_altura = st.number_input("Altura Actual (m):", min_value=0.5, value=1.75)
+            reg_deporte = st.text_input("Deporte / Disciplina:")
+            reg_obj = st.text_area("Objetivo principal:")
+            
+            # Caja para subir foto desde cámara o galería
+            foto_subida = st.file_uploader("📸 Subí tu Foto de Perfil (Galería o Cámara):", type=["jpg", "jpeg", "png", "webp"])
+            
+            btn_reg_submit = st.button("Enviar Registro 👤", use_container_width=True, type="primary")
                 
             if btn_reg_submit:
                 if reg_nombre.strip() == "" or reg_user.strip() == "" or reg_pass == "":
                     st.error("❌ Todos los campos obligatorios deben estar completos.")
                 else:
                     try:
+                        foto_final = AVATAR_PREDETERMINADO
+                        if foto_subida is not None:
+                            with st.spinner("Subiendo foto a Supabase..."):
+                                url_subida = subir_foto_perfil(foto_subida, reg_user)
+                                if url_subida:
+                                    foto_final = url_subida
+                        
                         supabase.table("alumnos").insert({
                             "nombre_apellido": reg_nombre.strip(), "usuario": reg_user,
                             "contrasena": hashear_password(reg_pass), "fecha_nacimiento": reg_nacimiento.strftime("%Y-%m-%d"),
-                            "peso": reg_peso, "altura": reg_altura, "deporte": reg_deporte, "objetivo": reg_obj, "estado": "pendiente"
+                            "peso": reg_peso, "altura": reg_altura, "deporte": reg_deporte, "objetivo": reg_obj, 
+                            "estado": "pendiente", "foto_perfil": foto_final
                         }).execute()
-                        st.success(f"🎉 ¡Registro enviado, {reg_nombre}! Quedó pendiente de aprobación.")
-                    except Exception: st.error("❌ El usuario o nombre ya se encuentran registrados.")
+                        st.success(f"🎉 ¡Registro enviado, {reg_nombre}! Quedó pendiente de aprobación por el Profe Giuliano.")
+                    except Exception as e: 
+                        st.error(f"❌ El usuario o nombre ya se encuentran registrados o hubo un problema técnico: {e}")
     st.stop()
 
 st.sidebar.markdown(f"👤 Coach: **{st.session_state['usuario_actual']}**")
@@ -189,6 +232,36 @@ if st.sidebar.button("🔒 Cerrar Sesión"):
 res_aprob = supabase.table("alumnos").select("nombre_apellido").eq("estado", "aprobado").order("nombre_apellido").execute()
 lista_alumnos = [f["nombre_apellido"] for f in res_aprob.data]
 lista_alumnos_con_neutro = ["- Seleccionar Atleta -"] + lista_alumnos
+
+# ==========================================
+# 🔔 SECCIÓN DE AUTO-REFRESH EN VIVO (FRAGMENT)
+# ==========================================
+@st.fragment(run_every=12)
+def monitor_en_vivo_fragment():
+    if st.session_state["rol_actual"] == "admin":
+        res_n = supabase.table("notificaciones").select("id, mensaje").eq("destinatario", "giuliano").eq("leido", False).execute()
+        if res_n.data:
+            for noti in res_n.data:
+                st.toast(f"🔔 {noti['mensaje']}", icon="🏃")
+                supabase.table("notificaciones").update({"leido": True}).eq("id", noti["id"]).execute()
+                time.sleep(0.5)
+                st.rerun()
+                
+        res_p = supabase.table("alumnos").select("id").eq("estado", "pendiente").execute()
+        if res_p.data:
+            st.toast(f"👥 Tenés {len(res_p.data)} solicitud/es de atletas pendientes de aprobación.", icon="👤")
+            
+    elif st.session_state["rol_actual"] == "atleta":
+        alumno_log = st.session_state["usuario_actual"]
+        res_n_at = supabase.table("notificaciones").select("id, mensaje").eq("destinatario", alumno_log).eq("leido", False).execute()
+        if res_n_at.data:
+            for noti in res_n_at.data:
+                st.toast(f"🔔 {noti['mensaje']}", icon="🏋️‍♂️")
+                supabase.table("notificaciones").update({"leido": True}).eq("id", noti["id"]).execute()
+                time.sleep(0.5)
+                st.rerun()
+
+monitor_en_vivo_fragment()
 
 # ==========================================
 # 📱 INTERFAZ ATLETA CON CARGA HORIZONTAL Y HISTORIAL
@@ -230,7 +303,6 @@ def renderizar_tabla_entrenamiento(nombre_atleta, es_espejo=False):
                 res_v = supabase.table("biblioteca_ejercicios").select("link_video").eq("nombre", nombre_ejercicio).execute()
                 link_video = res_v.data[0]["link_video"] if res_v.data else ""
                 
-                # --- OBTENER HISTORIAL DE CARGA ANTERIOR ---
                 res_hist_prev = supabase.table("registros_entrenamiento").select("kilos, reps_reales, fecha").eq("alumno", nombre_atleta).eq("ejercicio", nombre_ejercicio).order("id", desc=True).limit(series_prescritas).execute()
                 texto_historial = ""
                 if res_hist_prev.data:
@@ -249,7 +321,6 @@ def renderizar_tabla_entrenamiento(nombre_atleta, es_espejo=False):
                     
                     st.markdown(f"<p style='font-size: 0.85rem; color: #94A3B8; margin-top: -8px; margin-bottom: 8px;'>{texto_historial}</p>", unsafe_allow_html=True)
                     
-                    # Carga Horizontal Adaptada al celular
                     columnas_visuales = st.columns(series_prescritas)
                     
                     for s in range(1, series_prescritas + 1):
@@ -357,18 +428,18 @@ if "mensaje_motivacional_pop" in st.session_state:
 if st.session_state["rol_actual"] == "atleta":
     alumno_logueado = st.session_state["usuario_actual"]
     
-    # 🔔 NOTIFICACIONES DEL ATLETA
-    res_notif = supabase.table("notificaciones").select("id, mensaje").eq("destinatario", alumno_logueado).eq("leido", False).execute()
-    if res_notif.data:
-        for noti in res_notif.data:
-            st.warning(f"🔔 **Notificación:** {noti['mensaje']}")
-            if st.button("Entendido / Descartar", key=f"desc_{noti['id']}"):
-                supabase.table("notificaciones").update({"leido": True}).eq("id", noti["id"]).execute()
-                st.rerun()
+    res_at_raw = supabase.table("alumnos").select("foto_perfil, usuario").eq("nombre_apellido", alumno_logueado).execute()
+    foto_perfil_url = res_at_raw.data[0]["foto_perfil"] if (res_at_raw.data and "foto_perfil" in res_at_raw.data[0] and res_at_raw.data[0]["foto_perfil"]) else AVATAR_PREDETERMINADO
+    slug_usuario = res_at_raw.data[0]["usuario"] if res_at_raw.data else "atleta"
 
-    st.markdown(f"### 👋 ¡Hola, **{alumno_logueado}**!")
+    col_per_1, col_per_2 = st.columns([1, 6])
+    with col_per_1:
+        st.markdown(f'<img src="{foto_perfil_url}" width="85" height="85" class="profile-pic">', unsafe_allow_html=True)
+    with col_per_2:
+        st.markdown(f"<h3 style='margin-bottom: 0px;'>👋 ¡Hola, **{alumno_logueado}**!</h3>", unsafe_allow_html=True)
+        st.markdown("<p style='color: #84CC16; font-size: 0.95rem; margin-top: 0px;'>Atleta de Alto Rendimiento • Mag Power Gym</p>", unsafe_allow_html=True)
     
-    tab_entrenar, tab_progreso, tab_consultas = st.tabs(["🏋️‍♂️ Mi Sesión", "📈 Mi Progreso", "💬 Dudas al Profe"])
+    tab_entrenar, tab_progreso, tab_consultas, tab_perfil_config = st.tabs(["🏋️‍♂️ Mi Sesión", "📈 Mi Progreso", "💬 Dudas al Profe", "⚙️ Configurar Perfil"])
     
     with tab_entrenar: 
         renderizar_tabla_entrenamiento(alumno_logueado, es_espejo=False)
@@ -396,44 +467,57 @@ if st.session_state["rol_actual"] == "atleta":
             st.line_chart(df_sesiones_unique.set_index("fecha_corta")["carga_srpe"])
             
     with tab_consultas:
-        st.markdown("### 💬 Canal de Dudas al Profe")
+        st.markdown("### 💬 Canal de Dudas Directas al Profe")
         with st.form("form_mensaje_alumno", clear_on_submit=True):
-            nuevo_msg = st.text_area("Escribí tu consulta técnica (recorrido, molestias, fatiga):")
+            nuevo_msg = st.text_area("Escribí tu consulta técnica o comentario de forma privada:", placeholder="Ej: Me molestó el hombro izquierdo en el press...")
             btn_env_msg = st.form_submit_button("Enviar Consulta 🚀")
             
         if btn_env_msg and nuevo_msg.strip() != "":
             supabase.table("consultas_mensajes").insert({
                 "alumno": alumno_logueado, "mensaje": nuevo_msg.strip()
             }).execute()
-            st.success("📩 ¡Mensaje enviado al Profe Giuliano!")
+            st.success("📩 ¡Mensaje enviado al Profe Giuliano de forma privada!")
             st.rerun()
             
         st.divider()
-        st.markdown("#### 📬 Historial de Respuestas")
+        st.markdown("#### 📬 Historial de Mensajes Privados")
         res_msgs = supabase.table("consultas_mensajes").select("*").eq("alumno", alumno_logueado).order("id", desc=True).execute()
-        for msg in res_msgs.data:
-            with st.container():
-                st.markdown(f"**Tú ({msg['fecha'].split('T')[0]}):** *{msg['mensaje']}*")
-                if msg["respuesta"]:
-                    st.markdown(f"<p style='color: #84CC16;'><strong>Profe Giuliano:</strong> {msg['respuesta']}</p>", unsafe_allow_html=True)
-                else:
-                    st.markdown("⏳ *Esperando respuesta...*")
-                st.markdown("---")
+        if not res_msgs.data:
+            st.info("No tenés consultas anteriores guardadas.")
+        else:
+            for msg in res_msgs.data:
+                with st.container():
+                    st.markdown(f"**Tú** *({msg['fecha'].split('T')[0]}):*  \n> {msg['mensaje']}")
+                    if msg["respuesta"]:
+                        st.markdown(f"💚 **Profe Giuliano:**  \n> {msg['respuesta']}")
+                    else:
+                        st.markdown("⏳ *Esperando respuesta técnica...*")
+                    st.markdown("---")
+                    
+    with tab_perfil_config:
+        st.markdown("### ⚙️ Personalizar tu Perfil")
+        
+        # Subida directa de archivo para el perfil del atleta
+        nueva_foto_atleta = st.file_uploader("📸 Subí una nueva foto desde tu galería o PC para cambiar tu avatar actual:", type=["jpg", "jpeg", "png", "webp"])
+        btn_actualizar_perf = st.button("💾 Guardar Nueva Foto de Perfil", type="primary")
+            
+        if btn_actualizar_perf:
+            if nueva_foto_atleta is not None:
+                with st.spinner("Subiendo tu foto..."):
+                    url_subida = subir_foto_perfil(nueva_foto_atleta, slug_usuario)
+                    if url_subida:
+                        supabase.table("alumnos").update({"foto_perfil": url_subida}).eq("nombre_apellido", alumno_logueado).execute()
+                        st.success("🎉 ¡Tu foto de perfil fue guardada con éxito!")
+                        st.rerun()
+            else:
+                st.warning("⚠️ Tenés que elegir un archivo de imagen antes de guardar.")
 
 # ==========================================
 # 🚀 PANTALLAS SEGÚN ROL (COACH/ADMIN)
 # ==========================================
 elif st.session_state["rol_actual"] == "admin":
-    res_notif_ad = supabase.table("notificaciones").select("id, mensaje").eq("destinatario", "giuliano").eq("leido", False).execute()
-    if res_notif_ad.data:
-        for noti in res_notif_ad.data:
-            st.toast(noti["mensaje"], icon="🏃")
-            if st.button("Marcar como leído", key=f"desc_ad_{noti['id']}"):
-                supabase.table("notificaciones").update({"leido": True}).eq("id", noti["id"]).execute()
-                st.rerun()
-
     tab_dashboard, tab_rutinas, tab_clonar, tab_consultas_profe, tab_fichas, tab_aprobaciones, tab_excel = st.tabs([
-        "📊 Historial", "📝 Diseñar Plan", "👥 Clonar Pizarra", "💬 Mensajes Recibidos", "📋 Fichas Clínicas", "👥 Aprobar Atletas", "📚 Biblioteca"
+        "📊 Historial", "📝 Diseñar Plan", "👥 Clonar Pizarra", "💬 Mensajes Recibidos", "📋 Fichas/Atletas", "👥 Aprobar Atletas", "📚 Biblioteca"
     ])
     
     with tab_dashboard:
@@ -617,56 +701,128 @@ elif st.session_state["rol_actual"] == "admin":
                     st.rerun()
 
     with tab_consultas_profe:
-        st.markdown("### 📬 Mensajes y Consultas de Atletas")
-        res_cli_msg = supabase.table("consultas_mensajes").select("*").order("id", desc=True).execute()
-        if not res_cli_msg.data:
-            st.info("No hay mensajes o consultas de atletas todavía.")
+        st.markdown("### 🔒 Canal de Mensajería Privada")
+        atleta_msg = st.selectbox("🔍 Seleccionar Atleta para chatear en privado:", lista_alumnos_con_neutro, key="sb_atleta_msg")
+        
+        if atleta_msg == "- Seleccionar Atleta -":
+            st.info("Elegí un atleta para cargar de forma segura y privada su historial de chat.")
         else:
-            for c_msg in res_cli_msg.data:
-                with st.container():
-                    st.markdown(f"👤 **{c_msg['alumno']}** ({c_msg['fecha'].split('T')[0]}): *\"{c_msg['mensaje']}\"*")
-                    if c_msg["respuesta"]:
-                        st.markdown(f"✅ Respondido: *{c_msg['respuesta']}*")
-                    else:
-                        with st.form(f"resp_f_{c_msg['id']}", clear_on_submit=True):
-                            txt_resp = st.text_input("Escribí tu respuesta técnica:")
-                            btn_resp = st.form_submit_button("Responder Consulta 📤")
-                        if btn_resp and txt_resp.strip() != "":
-                            supabase.table("consultas_mensajes").update({"respuesta": txt_resp.strip()}).eq("id", c_msg["id"]).execute()
-                            st.rerun()
-                st.markdown("---")
+            res_cli_msg = supabase.table("consultas_mensajes").select("*").eq("alumno", atleta_msg).order("id", desc=True).execute()
+            
+            with st.form(f"resp_f_directa_{atleta_msg.replace(' ','_')}", clear_on_submit=True):
+                txt_nuevo_profe = st.text_area(f"Escribir un mensaje técnico directo para {atleta_msg}:")
+                btn_env_directo = st.form_submit_button("Enviar Mensaje 📤")
+            if btn_env_directo and txt_nuevo_profe.strip() != "":
+                supabase.table("consultas_mensajes").insert({
+                    "alumno": atleta_msg,
+                    "mensaje": "*(Iniciado por el Profe Giuliano)*",
+                    "respuesta": txt_nuevo_profe.strip()
+                }).execute()
+                st.success("📩 Mensaje enviado al atleta de forma directa.")
+                st.rerun()
+                
+            st.divider()
+            st.markdown(f"#### 📬 Conversación privada con: **{atleta_msg}**")
+            
+            if not res_cli_msg.data:
+                st.info("No hay consultas registradas para este atleta.")
+            else:
+                for c_msg in res_cli_msg.data:
+                    with st.container():
+                        st.markdown(f"👤 **{c_msg['alumno']}** *({c_msg['fecha'].split('T')[0]}):*  \n> {c_msg['mensaje']}")
+                        if c_msg["respuesta"]:
+                            st.markdown(f"💚 **Profe Giuliano (Tú):**  \n> {c_msg['respuesta']}")
+                        else:
+                            with st.form(f"resp_f_form_{c_msg['id']}", clear_on_submit=True):
+                                txt_resp = st.text_input("Escribí tu respuesta privada:")
+                                btn_resp = st.form_submit_button("Responder Consulta 📤")
+                            if btn_resp and txt_resp.strip() != "":
+                                supabase.table("consultas_mensajes").update({
+                                    "respuesta": txt_resp.strip()
+                                }).eq("id", c_msg["id"]).execute()
+                                st.rerun()
+                    st.markdown("---")
 
     with tab_fichas:
-        st.markdown("### 📋 Fichas Clínicas")
+        st.markdown("### 📋 Fichas Clínicas y Base de Datos de Atletas")
         res_cli = supabase.table("alumnos").select("*").eq("estado", "aprobado").order("nombre_apellido").execute()
-        for al_fila in res_cli.data:
-            n_c = al_fila["nombre_apellido"]
-            u_a = al_fila["usuario"]
-            f_n = al_fila["fecha_nacimiento"]
-            p_k = al_fila["peso"]
-            a_m = al_fila["altura"]
-            d_e = al_fila["deporte"]
-            o_f = al_fila["objetivo"]
-            
-            with st.expander(f"👤 {n_c} | Deporte: {d_e} | Edad: {calcular_edad(f_n)} años"):
-                st.text(f"• Usuario: {u_a}  • Peso: {p_k} kg  • Altura: {a_m} m\n• Foco: {o_f}")
-                if st.checkbox("✍️ Editar Ficha", key=f"chk_{n_c.replace(' ','_')}"):
-                    with st.form(f"f_inline_{n_c.replace(' ','_')}"):
-                        nuevo_user = st.text_input("Usuario:", value=u_a)
-                        nuevo_dep = st.text_input("Deporte:", value=d_e)
-                        nuevo_peso = st.number_input("Peso:", value=float(p_k))
-                        nuevo_alt = st.number_input("Altura:", value=float(a_m))
-                        nuevo_obj = st.text_area("Objetivo:", value=o_f)
-                        if st.form_submit_button("💾 Guardar"):
-                            supabase.table("alumnos").update({
-                                "usuario": nuevo_user, "peso": nuevo_peso, "altura": nuevo_alt,
-                                "deporte": nuevo_dep, "objetivo": nuevo_obj
-                            }).eq("nombre_apellido", n_c).execute()
-                            st.rerun()
+        
+        if not res_cli.data:
+            st.info("No hay atletas registrados actualmente.")
+        else:
+            for al_fila in res_cli.data:
+                n_c = al_fila["nombre_apellido"]
+                u_a = al_fila["usuario"]
+                f_n = al_fila["fecha_nacimiento"]
+                p_k = al_fila["peso"]
+                a_m = al_fila["altura"]
+                d_e = al_fila["deporte"]
+                o_f = al_fila["objetivo"]
+                al_id = al_fila["id"]
+                
+                foto_fila_url = al_fila["foto_perfil"] if ("foto_perfil" in al_fila and al_fila["foto_perfil"]) else AVATAR_PREDETERMINADO
+                
+                with st.expander(f"👤 {n_c} | Deporte: {d_e} | Edad: {calcular_edad(f_n)} años"):
+                    col_f_1, col_f_2 = st.columns([1, 5])
+                    with col_f_1:
+                        st.markdown(f'<img src="{foto_fila_url}" width="110" height="110" class="profile-pic">', unsafe_allow_html=True)
+                    with col_f_2:
+                        st.text(f"• Usuario de Acceso: {u_a}\n• Peso: {p_k} kg  • Altura: {a_m} m\n• Objetivo Principal: {o_f}")
+                    
+                    st.divider()
+                    col_ed, col_el = st.columns(2)
+                    
+                    with col_ed:
+                        if st.checkbox("✍️ Editar Ficha de Atleta", key=f"chk_edit_{al_id}"):
+                            # Quitamos el form para procesar el File Uploader de forma aislada
+                            nuevo_nom = st.text_input("Nombre y Apellido:", value=n_c, key=f"en_{al_id}")
+                            nuevo_user = st.text_input("Usuario de Acceso:", value=u_a, key=f"eu_{al_id}")
+                            nuevo_dep = st.text_input("Deporte / Disciplina:", value=d_e, key=f"ed_{al_id}")
+                            nuevo_peso = st.number_input("Peso (kg):", value=float(p_k), key=f"ep_{al_id}")
+                            nuevo_alt = st.number_input("Altura (m):", value=float(a_m), key=f"ea_{al_id}")
+                            nuevo_obj = st.text_area("Foco / Objetivo:", value=o_f, key=f"eo_{al_id}")
+                            
+                            # Opción de subir foto para este atleta desde tu panel
+                            nueva_foto_profe = st.file_uploader(f"📸 Cambiar foto de {n_c}:", type=["jpg", "jpeg", "png", "webp"], key=f"ef_{al_id}")
+                            
+                            if st.button("💾 Guardar Cambios", key=f"ebs_{al_id}", type="primary"):
+                                foto_actualizada = foto_fila_url
+                                if nueva_foto_profe is not None:
+                                    with st.spinner("Subiendo imagen..."):
+                                        url_subida = subir_foto_perfil(nueva_foto_profe, nuevo_user)
+                                        if url_subida:
+                                            foto_actualizada = url_subida
+                                            
+                                supabase.table("alumnos").update({
+                                    "nombre_apellido": nuevo_nom.strip(),
+                                    "usuario": nuevo_user.strip(),
+                                    "peso": nuevo_peso,
+                                    "altura": nuevo_alt,
+                                    "deporte": nuevo_dep.strip(),
+                                    "objetivo": nuevo_obj.strip(),
+                                    "foto_perfil": foto_actualizada
+                                }).eq("id", al_id).execute()
+                                st.success("🎉 Datos de la ficha actualizados correctamente.")
+                                st.rerun()
+                                    
+                    with col_el:
+                        st.markdown("<p style='color: #EF4444; font-weight: bold;'>⚠️ Zona de Riesgo (Baja de Atleta)</p>", unsafe_allow_html=True)
+                        confirmar_borrado = st.checkbox("🔑 Entiendo que esta acción es definitiva y deseo eliminar", key=f"del_chk_{al_id}")
+                        if confirmar_borrado:
+                            if st.button(f"🗑️ BORRAR DEFINITIVAMENTE A {n_c.upper()}", key=f"del_btn_{al_id}", type="primary"):
+                                supabase.table("registros_entrenamiento").delete().eq("alumno", n_c).execute()
+                                supabase.table("asistencia").delete().eq("alumno", n_c).execute()
+                                supabase.table("rutinas_asignadas").delete().eq("alumno", n_c).execute()
+                                supabase.table("consultas_mensajes").delete().eq("alumno", n_c).execute()
+                                supabase.table("alumnos").delete().eq("id", al_id).execute()
+                                
+                                st.toast(f"🗑️ El atleta {n_c} fue dado de baja completa de la base de datos.", icon="❌")
+                                time.sleep(1)
+                                st.rerun()
 
     with tab_aprobaciones:
         st.markdown("### 👥 Solicitudes de Autoregistro Pendientes")
-        res_pend = supabase.table("alumnos").select("id, nombre_apellido, usuario, deporte, objetivo").eq("estado", "pendiente").order("id").execute()
+        res_pend = supabase.table("alumnos").select("id, nombre_apellido, usuario, deporte, objetivo, foto_perfil").eq("estado", "pendiente").order("id").execute()
         pendientes = res_pend.data
         if not pendientes: st.info("No hay solicitudes pendientes.")
         else:
@@ -674,17 +830,23 @@ elif st.session_state["rol_actual"] == "admin":
                 p_id = p_atleta["id"]
                 p_nom = p_atleta["nombre_apellido"]
                 p_user = p_atleta["usuario"]
+                p_foto = p_atleta["foto_perfil"] if ("foto_perfil" in p_atleta and p_atleta["foto_perfil"]) else AVATAR_PREDETERMINADO
+                
                 with st.container():
-                    st.markdown(f"**👤 Atleta:** `{p_nom}` | **Usuario:** `{p_user}`")
-                    col_ap1, col_ap2, _ = st.columns([1, 1, 3])
-                    with col_ap1:
-                        if st.button("✅ APROBAR", key=f"ap_{p_id}"):
-                            supabase.table("alumnos").update({"estado": "aprobado"}).eq("id", p_id).execute()
-                            st.rerun()
-                    with col_ap2:
-                        if st.button("❌ RECHAZAR", key=f"re_{p_id}", type="primary"):
-                            supabase.table("alumnos").delete().eq("id", p_id).execute()
-                            st.rerun()
+                    col_p_1, col_p_2 = st.columns([1, 6])
+                    with col_p_1:
+                        st.markdown(f'<img src="{p_foto}" width="70" height="70" class="profile-pic">', unsafe_allow_html=True)
+                    with col_p_2:
+                        st.markdown(f"**👤 Atleta:** `{p_nom}` | **Usuario:** `{p_user}`")
+                        col_ap1, col_ap2, _ = st.columns([1, 1, 3])
+                        with col_ap1:
+                            if st.button("✅ APROBAR", key=f"ap_{p_id}"):
+                                supabase.table("alumnos").update({"estado": "aprobado"}).eq("id", p_id).execute()
+                                st.rerun()
+                        with col_ap2:
+                            if st.button("❌ RECHAZAR", key=f"re_{p_id}", type="primary"):
+                                supabase.table("alumnos").delete().eq("id", p_id).execute()
+                                st.rerun()
 
     with tab_excel:
         st.markdown("### 📚 Importar Biblioteca de Ejercicios (.xlsx / .csv)")
@@ -715,12 +877,11 @@ elif st.session_state["rol_actual"] == "admin":
                     st.dataframe(df_ejercicios.head(10), use_container_width=True)
                     
                     if st.button("📥 CONFIRMAR E INYECTAR A LA BIBLIOTECA", use_container_width=True, type="primary"):
-                        # 1. Traemos de una sola vez los nombres ya existentes en la base para comparar en memoria
                         res_existentes = supabase.table("biblioteca_ejercicios").select("nombre").execute()
                         nombres_existentes = {fila["nombre"].lower().strip() for fila in res_existentes.data} if res_existentes.data else set()
                         
                         lote_nuevos = []
-                        nombres_en_este_excel = set() # Evita duplicados dentro del mismo Excel cargado
+                        nombres_en_este_excel = set()
                         
                         for _, fila in df_ejercicios.iterrows():
                             n_val = str(fila[col_nombre]).strip()
@@ -728,8 +889,6 @@ elif st.session_state["rol_actual"] == "admin":
                                 continue
                             
                             n_val_lower = n_val.lower()
-                            
-                            # Si ya existe en la base de datos o ya lo procesamos en este loop, lo salteamos silenciosamente
                             if n_val_lower in nombres_existentes or n_val_lower in nombres_en_este_excel:
                                 continue
                             
@@ -743,7 +902,6 @@ elif st.session_state["rol_actual"] == "admin":
                             })
                             nombres_en_este_excel.add(n_val_lower)
                         
-                        # 2. Inyectamos todo el lote en un único viaje a Supabase
                         if lote_nuevos:
                             supabase.table("biblioteca_ejercicios").insert(lote_nuevos).execute()
                             st.success(f"🎉 ¡Inyección masiva completada! Se agregaron {len(lote_nuevos)} ejercicios nuevos sin duplicar nada.")
