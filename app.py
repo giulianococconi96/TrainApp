@@ -54,12 +54,12 @@ def calcular_edad(fecha_nac_str):
 
 def obtener_frase_motivacional(dias_acumulados):
     frases = [
-        "¡Excelente primer paso! El camino a la alta competencia empieza hoy. 🚀",
+        "¡Excelente primer paso! El camino hacia tus objetivos empieza hoy. 🚀",
         "¡Buen comienzo! La constancia es el secreto del rendimiento. 💪",
         f"¡Suma y sigue! Ya van {dias_acumulados} entrenamientos este mes. ¡Buen ritmo! ⚡",
-        f"¡Cuerpo e intención enfocados! Llevás {dias_acumulados} sesiones. No aflojes. 🔥",
+        f"¡Cuerpo y mente enfocados! Llevás {dias_acumulados} sesiones. No aflojes. 🔥",
         f"¡Tremenda disciplina! {dias_acumulados} días dándolo todo. Te estás volviendo imparable. 👑",
-        f"El esfuerzo de hoy es el rendimiento del mañana. ¡{dias_acumulados} sesiones acumuladas! 🏆",
+        f"El esfuerzo de hoy son los resultados de mañana. ¡{dias_acumulados} sesiones acumuladas! 🏆",
         f"¡Nivel Élite! 🔥 {dias_acumulados} entrenamientos en el mes. Sos un ejemplo de consistencia. 🦅"
     ]
     return random.choice(frases)
@@ -70,25 +70,25 @@ def obtener_frase_motivacional(dias_acumulados):
 def subir_foto_perfil(archivo_imagen, usuario_slug) -> str:
     """Sube la imagen al Storage de Supabase y retorna la URL pública."""
     try:
-        # Generamos un nombre único usando el usuario y la extensión
+        # Sanitizar el nombre del usuario para evitar caracteres raros en la URL
+        usuario_limpio = str(usuario_slug).replace(" ", "_").lower()
         extension = archivo_imagen.name.split(".")[-1]
-        nombre_archivo = f"{usuario_slug}_{int(time.time())}.{extension}"
+        nombre_archivo = f"{usuario_limpio}_{int(time.time())}.{extension}"
         
-        # Leemos los bytes de la imagen subida
         bytes_datos = archivo_imagen.getvalue()
         
-        # Subimos el archivo al bucket 'fotos_perfil'
+        # Subida al bucket
         supabase.storage.from_("fotos_perfil").upload(
             path=nombre_archivo,
             file=bytes_datos,
             file_options={"content-type": f"image/{extension}"}
         )
         
-        # Obtenemos la URL pública para renderizarla
+        # Generar URL pública
         url_publica = supabase.storage.from_("fotos_perfil").get_public_url(nombre_archivo)
         return url_publica
     except Exception as e:
-        st.error(f"⚠️ Error al subir la imagen a Supabase Storage: {e}")
+        st.error(f"⚠️ Error al procesar o subir la foto: {e}")
         return None
 
 # ==========================================
@@ -178,7 +178,6 @@ if not st.session_state["autenticado"]:
         st.markdown("<h3 style='text-align: center;'>📝 Registro de Atleta</h3>", unsafe_allow_html=True)
         col_r1, col_r2, col_r3 = st.columns([1, 2, 1])
         with col_r2:
-            # Quitamos el form completo de Streamlit para el autoregistro para poder procesar la foto dinámicamente sin fallos del file_uploader
             reg_nombre = st.text_input("Nombre y Apellido completo:")
             reg_user = st.text_input("Nombre de Usuario (para ingresar):").strip().lower()
             reg_pass = st.text_input("Contraseña de Acceso:", type="password")
@@ -186,21 +185,21 @@ if not st.session_state["autenticado"]:
             reg_peso = st.number_input("Peso Actual (kg):", min_value=1.0, value=70.0)
             reg_altura = st.number_input("Altura Actual (m):", min_value=0.5, value=1.75)
             reg_deporte = st.text_input("Deporte / Disciplina:")
-            reg_obj = st.text_area("Objetivo principal:")
+            reg_obj = st.text_area("Objetivo principal (¿Qué querés lograr entrenando con Giuliano?):")
             
-            # Caja para subir foto desde cámara o galería
-            foto_subida = st.file_uploader("📸 Subí tu Foto de Perfil (Galería o Cámara):", type=["jpg", "jpeg", "png", "webp"])
+            # Subida de foto fuera de formulario para evitar el error de flujo de Streamlit
+            foto_subida = st.file_uploader("📸 Subí tu Foto de Perfil (Opcional - Galería o Cámara):", type=["jpg", "jpeg", "png", "webp"])
             
             btn_reg_submit = st.button("Enviar Registro 👤", use_container_width=True, type="primary")
                 
             if btn_reg_submit:
                 if reg_nombre.strip() == "" or reg_user.strip() == "" or reg_pass == "":
-                    st.error("❌ Todos los campos obligatorios deben estar completos.")
+                    st.error("❌ Todos los campos obligatorios (Nombre, Usuario y Contraseña) deben estar completos.")
                 else:
                     try:
                         foto_final = AVATAR_PREDETERMINADO
                         if foto_subida is not None:
-                            with st.spinner("Subiendo foto a Supabase..."):
+                            with st.spinner("Subiendo foto de perfil..."):
                                 url_subida = subir_foto_perfil(foto_subida, reg_user)
                                 if url_subida:
                                     foto_final = url_subida
@@ -216,7 +215,14 @@ if not st.session_state["autenticado"]:
                         st.error(f"❌ El usuario o nombre ya se encuentran registrados o hubo un problema técnico: {e}")
     st.stop()
 
-st.sidebar.markdown(f"👤 Coach: **{st.session_state['usuario_actual']}**")
+# ==========================================
+# 👤 MENÚ LATERAL (SIDEBAR) - VISUALES SEGÚN ROL
+# ==========================================
+if st.session_state["rol_actual"] == "admin":
+    st.sidebar.markdown(f"👤 Coach: **{st.session_state['usuario_actual']}**")
+else:
+    # Corrección 1: Ocultar "Coach: Alumno" en la barra lateral del celular/PC del atleta
+    st.sidebar.markdown(f"🏃 Atleta: **{st.session_state['usuario_actual']}**")
 
 if st.session_state["rol_actual"] == "atleta":
     mes_actual_str = datetime.now().strftime("%m-%Y")
@@ -387,7 +393,7 @@ def renderizar_tabla_entrenamiento(nombre_atleta, es_espejo=False):
                         supabase.table("registros_entrenamiento").insert({
                             "fecha": fecha_actual, "alumno": nombre_atleta, "nombre_rutina": nombre_reporte_dia,
                             "ejercicio": datos["ejercicio"], "nro_serie": datos["serie"], "kilos": datos["kilos"],
-                            "reps_reales": datos["reps_reales"], "rpe_serie": 0.0, "notas": datos["notes_field"],
+                            "reps_reales": datos["reps_reales"], "rpe_serie": 0.0, "notas": datos["notes_field"] if "notes_field" in datos else "",
                             "rpe_global_sesion": rpe_global, "duracion_minutos": duracion_min
                         }).execute()
                         
@@ -428,16 +434,19 @@ if "mensaje_motivacional_pop" in st.session_state:
 if st.session_state["rol_actual"] == "atleta":
     alumno_logueado = st.session_state["usuario_actual"]
     
-    res_at_raw = supabase.table("alumnos").select("foto_perfil, usuario").eq("nombre_apellido", alumno_logueado).execute()
+    res_at_raw = supabase.table("alumnos").select("foto_perfil, usuario, objetivo, deporte").eq("nombre_apellido", alumno_logueado).execute()
     foto_perfil_url = res_at_raw.data[0]["foto_perfil"] if (res_at_raw.data and "foto_perfil" in res_at_raw.data[0] and res_at_raw.data[0]["foto_perfil"]) else AVATAR_PREDETERMINADO
     slug_usuario = res_at_raw.data[0]["usuario"] if res_at_raw.data else "atleta"
+    deporte_atleta = res_at_raw.data[0]["deporte"] if res_at_raw.data else "Preparación Física"
+    objetivo_atleta = res_at_raw.data[0]["objetivo"] if res_at_raw.data else "Sin objetivo declarado"
 
+    # Cabecera con Foto Redonda, Nombre y la descripción personalizada de su objetivo (Corrección 2)
     col_per_1, col_per_2 = st.columns([1, 6])
     with col_per_1:
         st.markdown(f'<img src="{foto_perfil_url}" width="85" height="85" class="profile-pic">', unsafe_allow_html=True)
     with col_per_2:
         st.markdown(f"<h3 style='margin-bottom: 0px;'>👋 ¡Hola, **{alumno_logueado}**!</h3>", unsafe_allow_html=True)
-        st.markdown("<p style='color: #84CC16; font-size: 0.95rem; margin-top: 0px;'>Atleta de Alto Rendimiento • Mag Power Gym</p>", unsafe_allow_html=True)
+        st.markdown(f"<p style='color: #84CC16; font-size: 0.95rem; margin-top: 0px; font-weight: bold;'>🎯 Meta: {objetivo_atleta} ({deporte_atleta})</p>", unsafe_allow_html=True)
     
     tab_entrenar, tab_progreso, tab_consultas, tab_perfil_config = st.tabs(["🏋️‍♂️ Mi Sesión", "📈 Mi Progreso", "💬 Dudas al Profe", "⚙️ Configurar Perfil"])
     
@@ -497,20 +506,18 @@ if st.session_state["rol_actual"] == "atleta":
     with tab_perfil_config:
         st.markdown("### ⚙️ Personalizar tu Perfil")
         
-        # Subida directa de archivo para el perfil del atleta
-        nueva_foto_atleta = st.file_uploader("📸 Subí una nueva foto desde tu galería o PC para cambiar tu avatar actual:", type=["jpg", "jpeg", "png", "webp"])
-        btn_actualizar_perf = st.button("💾 Guardar Nueva Foto de Perfil", type="primary")
-            
-        if btn_actualizar_perf:
-            if nueva_foto_atleta is not None:
+        # Corrección 3: Subida directa sin formularios para evitar que tire error
+        nueva_foto_atleta = st.file_uploader("📸 Subí una nueva foto desde tu galería o PC para cambiar tu avatar actual:", type=["jpg", "jpeg", "png", "webp"], key="upload_foto_atleta")
+        
+        if nueva_foto_atleta is not None:
+            if st.button("💾 Guardar Nueva Foto de Perfil", type="primary"):
                 with st.spinner("Subiendo tu foto..."):
                     url_subida = subir_foto_perfil(nueva_foto_atleta, slug_usuario)
                     if url_subida:
                         supabase.table("alumnos").update({"foto_perfil": url_subida}).eq("nombre_apellido", alumno_logueado).execute()
                         st.success("🎉 ¡Tu foto de perfil fue guardada con éxito!")
+                        time.sleep(1)
                         st.rerun()
-            else:
-                st.warning("⚠️ Tenés que elegir un archivo de imagen antes de guardar.")
 
 # ==========================================
 # 🚀 PANTALLAS SEGÚN ROL (COACH/ADMIN)
@@ -774,7 +781,6 @@ elif st.session_state["rol_actual"] == "admin":
                     
                     with col_ed:
                         if st.checkbox("✍️ Editar Ficha de Atleta", key=f"chk_edit_{al_id}"):
-                            # Quitamos el form para procesar el File Uploader de forma aislada
                             nuevo_nom = st.text_input("Nombre y Apellido:", value=n_c, key=f"en_{al_id}")
                             nuevo_user = st.text_input("Usuario de Acceso:", value=u_a, key=f"eu_{al_id}")
                             nuevo_dep = st.text_input("Deporte / Disciplina:", value=d_e, key=f"ed_{al_id}")
@@ -782,7 +788,7 @@ elif st.session_state["rol_actual"] == "admin":
                             nuevo_alt = st.number_input("Altura (m):", value=float(a_m), key=f"ea_{al_id}")
                             nuevo_obj = st.text_area("Foco / Objetivo:", value=o_f, key=f"eo_{al_id}")
                             
-                            # Opción de subir foto para este atleta desde tu panel
+                            # Corrección 3: Edición de foto desde el panel del profe optimizada
                             nueva_foto_profe = st.file_uploader(f"📸 Cambiar foto de {n_c}:", type=["jpg", "jpeg", "png", "webp"], key=f"ef_{al_id}")
                             
                             if st.button("💾 Guardar Cambios", key=f"ebs_{al_id}", type="primary"):
