@@ -53,6 +53,8 @@ def calcular_e1rm(peso: float, reps: int) -> float:
 def calcular_acwr(cargas_diarias: list) -> dict:
     """
     Calcula el Acute:Chronic Workload Ratio (ACWR).
+    - Carga Aguda: Suma de sRPE de los últimos 7 días.
+    - Carga Crónica: Promedio semanal de los últimos 28 días.
     """
     if not cargas_diarias or len(cargas_diarias) == 0:
         return {"aguda": 0.0, "cronica": 0.0, "acwr": 1.0, "estado": "Sin datos", "color": "#94A3B8"}
@@ -78,6 +80,7 @@ def calcular_acwr(cargas_diarias: list) -> dict:
     
     acwr = round(carga_aguda / carga_cronica, 2)
     
+    # Clasificación por semáforo de lesión
     if acwr < 0.8:
         estado = "Subentrenamiento ⚠️ (Bajo estímulo)"
         color = "#38BDF8"
@@ -359,7 +362,7 @@ def renderizar_tabla_entrenamiento(nombre_atleta, es_espejo=False):
         if st.button("🏁 FINALIZAR ENTRENAMIENTO", use_container_width=True, type="primary"):
             fecha_hoy_texto = obtener_fecha_hora_actual().strftime("%Y-%m-%d")
             
-            # --- CORRECCIÓN CLAVE: Verificamos contra la tabla Asistencia que solo guarda la fecha limpia ---
+            # Verificamos contra la tabla Asistencia que solo guarda la fecha limpia para evitar duplicados
             res_comp = supabase.table("asistencia").select("id").eq("alumno", nombre_atleta).eq("fecha", fecha_hoy_texto).execute()
             
             if res_comp.data: 
@@ -627,12 +630,22 @@ elif st.session_state["rol_actual"] == "admin":
                     st.rerun()
 
     with ta5:
+        st.markdown("### ✅ Aprobaciones de Nuevos Atletas")
         rp = supabase.table("alumnos").select("*").eq("estado", "pendiente").execute()
-        for p in rp.data:
-            st.write(f"Atleta: {p['nombre_apellido']}")
-            if st.button("Aprobar", key=f"ap_{p['id']}"):
-                supabase.table("alumnos").update({"estado":"aprobado"}).eq("id", p['id']).execute()
-                st.rerun()
+        
+        if not rp.data:
+            st.info("🎉 Sin aprobaciones pendientes. ¡Estás al día!")
+        else:
+            for p in rp.data:
+                col_ap1, col_ap2 = st.columns([3, 1])
+                with col_ap1:
+                    st.write(f"🏃 **Atleta:** {p['nombre_apellido']} ({p['usuario']})")
+                with col_ap2:
+                    if st.button("Aprobar Atleta", key=f"ap_{p['id']}", use_container_width=True):
+                        supabase.table("alumnos").update({"estado":"aprobado"}).eq("id", p['id']).execute()
+                        st.success(f"¡{p['nombre_apellido']} aprobado!")
+                        time.sleep(1)
+                        st.rerun()
 
     with ta6:
         st.markdown("### Biblioteca de Ejercicios")
