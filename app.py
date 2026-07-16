@@ -216,13 +216,13 @@ if not st.session_state["autenticado"]:
         col_r1, col_r2, col_r3 = st.columns([1, 2, 1])
         with col_r2:
             reg_nombre = st.text_input("Nombre y Apellido completo:")
-            reg_user = st.text_input("Nombre de Usuario:").strip().lower()
-            reg_pass = st.text_input("Contraseña:", type="password")
+            reg_user = st.text_input("Nombre de Usuario (para ingresar):").strip().lower()
+            reg_pass = st.text_input("Contraseña de Acceso:", type="password")
             reg_nacimiento = st.date_input("Fecha de Nacimiento:", value=date(2000, 1, 1))
             reg_peso = st.number_input("Peso Actual (kg):", min_value=1.0, value=70.0)
             reg_altura = st.number_input("Altura Actual (m):", min_value=0.5, value=1.75)
             reg_deporte = st.text_input("Deporte / Disciplina:")
-            reg_obj = st.text_area("Objetivo principal:")
+            reg_obj = st.text_area("Objetivo principal (¿Qué querés lograr entrenando con Giuliano?):")
             foto_subida = st.file_uploader("📸 Subí tu Foto de Perfil (Opcional):", type=["jpg", "jpeg", "png", "webp"])
             
             btn_reg_submit = st.button("Enviar Registro 👤", use_container_width=True, type="primary")
@@ -404,7 +404,6 @@ if st.session_state["rol_actual"] == "atleta":
         st.markdown(f"### 👋 ¡Hola, **{al}**!")
         st.markdown(f"<p style='color: #84CC16; font-weight: bold;'>🎯 Meta: {obj} ({dep})</p>", unsafe_allow_html=True)
     
-    # Hemos removido la pestaña de VBT por completo
     t1, t2, t3, t4 = st.tabs(["🏋️‍♂️ Mi Sesión", "📈 Mi Progreso", "💬 Dudas", "⚙️ Perfil"])
     with t1: renderizar_tabla_entrenamiento(al)
     with t2:
@@ -423,8 +422,12 @@ if st.session_state["rol_actual"] == "atleta":
             
             with sub_col2:
                 st.markdown("#### Historial de Carga del Entrenamiento (sRPE)")
-                df_srpe = df.drop_duplicates(subset=["fc"]).groupby("fc")["srpe"].sum().reset_index()
-                st.bar_chart(df_srpe.set_index("fc"))
+                if "srpe" in df.columns:
+                    df["srpe"] = df["srpe"].fillna(0.0)
+                    df_srpe = df.drop_duplicates(subset=["fc"]).groupby("fc")["srpe"].sum().reset_index()
+                    st.bar_chart(df_srpe.set_index("fc"))
+                else:
+                    st.info("Sin registros de sRPE suficientes.")
                 
             st.markdown("---")
             st.markdown("### 🚦 Tu Balance de Carga de Trabajo (ACWR)")
@@ -474,7 +477,14 @@ elif st.session_state["rol_actual"] == "admin":
             if rt.data:
                 df_t = pd.DataFrame(rt.data)
                 
-                df_clean = df_t.dropna(subset=["srpe"])
+                # --- PARCHE DE SEGURIDAD PARA LA COLUMNA SRPE ---
+                if "srpe" not in df_t.columns:
+                    df_t["srpe"] = 0.0
+                else:
+                    df_t["srpe"] = df_t["srpe"].fillna(0.0)
+                
+                df_clean = df_t[df_t["srpe"] > 0]
+                
                 if not df_clean.empty:
                     acwr_data = calcular_acwr(df_clean.to_dict('records'))
                     
@@ -504,6 +514,7 @@ elif st.session_state["rol_actual"] == "admin":
                 st.info("El atleta aún no posee sesiones grabadas.")
 
     with ta2:
+        st.markdown("### 📝 Diseñar Planificación")
         al_p = st.selectbox("Planificar para:", list_al_n)
         if al_p != "- Seleccionar -":
             nom_r = st.text_input("Nombre de la Rutina:")
@@ -511,21 +522,72 @@ elif st.session_state["rol_actual"] == "admin":
             with c1: dia = st.selectbox("Día:", DIAS_PLANIF)
             with c2: blo = st.selectbox("Bloque:", SUB_BLOQUES)
             
-            ej_nom = st.text_input("Ejercicio:")
-            s_o = st.number_input("Series:", 1, 10, 4)
-            r_o = st.text_input("Reps:", "10")
+            # --- RESTABLECIDO: SELECCIÓN INTELIGENTE DE EJERCICIOS ---
+            tipo_carga = st.radio(
+                "Modo de selección de ejercicio:", 
+                ["🔍 Buscar en Biblioteca por Patrón", "✍️ Escribir Ejercicio Manualmente (Libre / Aeróbico)"], 
+                horizontal=True
+            )
             
-            if st.button("➕ Añadir"):
-                st.session_state["borrador_rutina"].append({"ejercicio": ej_nom, "bloque": f"{dia}|{blo}", "series": s_o, "reps": r_o})
+            ej_nom = ""
+            if tipo_carga == "🔍 Buscar en Biblioteca por Patrón":
+                res_pat = supabase.table("biblioteca_ejercicios").select("grupo_muscular").execute()
+                patrones_disponibles = sorted(list(set([p["grupo_muscular"] for p in res_pat.data if p["grupo_muscular"]])))
+                
+                if patrones_disponibles:
+                    patron_seleccionado = st.selectbox("Filtrar por patrón de movimiento:", ["- Todos los patrones -"] + patrones_disponibles)
+                    if patron_seleccionado == "- Todos los patrones -":
+                        res_ejs = supabase.table("biblioteca_ejercicios").select("nombre").order("nombre").execute()
+                    else:
+                        res_ejs = supabase.table("biblioteca_ejercicios").select("nombre").eq("grupo_muscular", patron_seleccionado).order("nombre").execute()
+                else:
+                    res_ejs = supabase.table("biblioteca_ejercicios").select("nombre").order("nombre").execute()
+                    
+                ejercicios_filtrados = [fila["nombre"] for fila in res_ejs.data]
+                if ejercicios_filtrados: 
+                    ej_nom = st.selectbox("Seleccionar Ejercicio:", ejercicios_filtrados)
+                else: 
+                    ej_nom = st.text_input("No hay ejercicios en la base de datos. Escribilo a mano:")
+            else:
+                ej_nom = st.text_input("Escribí el ejercicio o trabajo aeróbico/libre:", placeholder="Ej: Pasadas 400m")
+
+            s_o = st.number_input("Series prescritas:", min_value=1, max_value=10, value=4)
+            r_o = st.text_input("Repeticiones objetivo:", "10")
+            
+            if st.button("➕ Añadir Ejercicio al Borrador", use_container_width=True):
+                if ej_nom.strip() == "" or nom_r.strip() == "":
+                    st.error("❌ Completa los campos obligatorios.")
+                else:
+                    st.session_state["borrador_rutina"].append({"ejercicio": ej_nom, "bloque": f"{dia}|{blo}", "series": s_o, "reps": r_o})
+                    st.toast(f"✅ Añadido: {ej_nom}")
             
             if st.session_state["borrador_rutina"]:
+                st.markdown("### 📋 Pizarra Borrador")
                 st.dataframe(pd.DataFrame(st.session_state["borrador_rutina"]))
-                if st.button("💾 PUBLICAR PLAN"):
-                    supabase.table("rutinas_asignadas").delete().eq("alumno", al_p).execute()
-                    for i in st.session_state["borrador_rutina"]:
-                        supabase.table("rutinas_asignadas").insert({"alumno": al_p, "nombre_rutina": nom_r, "ejercicio": i["ejercicio"], "bloque": i["bloque"], "series_objetivo": i["series"], "reps_objetivo": i["reps"]}).execute()
-                    st.session_state["borrador_rutina"] = []
-                    st.success("Publicado.")
+                
+                col_b1, col_b2 = st.columns(2)
+                with col_b1:
+                    if st.button("🗑️ Vaciar Borrador Actual", use_container_width=True):
+                        st.session_state["borrador_rutina"] = []
+                        st.rerun()
+                with col_b2:
+                    if st.button("💾 PUBLICAR PLAN", use_container_width=True, type="primary"):
+                        supabase.table("rutinas_asignadas").delete().eq("alumno", al_p).execute()
+                        for i in st.session_state["borrador_rutina"]:
+                            supabase.table("rutinas_asignadas").insert({
+                                "alumno": al_p, "nombre_rutina": nom_r.strip(), 
+                                "ejercicio": i["ejercicio"], "bloque": i["bloque"], 
+                                "series_objetivo": i["series"], "reps_objetivo": i["reps"]
+                            }).execute()
+                        
+                        supabase.table("notificaciones").insert({
+                            "destinatario": al_p,
+                            "mensaje": f"🏋️‍♂️ El Profe Giuliano actualizó tu planificación: {nom_r.strip()}."
+                        }).execute()
+                        
+                        st.session_state["borrador_rutina"] = []
+                        st.success("🎉 Planificación publicada de forma exitosa.")
+                        st.rerun()
 
     with ta3:
         al_m = st.selectbox("Chat Privado:", list_al_n)
@@ -559,7 +621,7 @@ elif st.session_state["rol_actual"] == "admin":
                 st.rerun()
 
     with ta6:
-        st.markdown("### Biblioteca")
+        st.markdown("### Biblioteca de Ejercicios")
         if st.button("Vaciar Biblioteca"):
             supabase.table("biblioteca_ejercicios").delete().neq("id", 0).execute()
         f_xl = st.file_uploader("Subir Excel:", type=["xlsx", "csv"])
