@@ -25,13 +25,17 @@ def init_supabase() -> Client:
 supabase = init_supabase()
 
 # ==========================================
-# ⏰ RELOJ OFICIAL EN ZONA HORARIA DE ARGENTINA
+# ⏰ RELOJ OFICIAL EN ZONA HORARIA DE ARGENTINA (CONSOLIDADOR)
 # ==========================================
 TZ_ARG = pytz.timezone("America/Argentina/Buenos_Aires")
 
 def obtener_fecha_hora_actual():
     """Retorna el objeto datetime localizado exactamente en Argentina."""
     return datetime.now(TZ_ARG)
+
+def obtener_fecha_iso_argentina():
+    """Retorna la fecha y hora formateada de forma segura para base de datos (con timezone offset)."""
+    return obtener_fecha_hora_actual().strftime("%Y-%m-%d %H:%M:%S-03:00")
 
 # ==========================================
 # 📊 METRICAS DE CARGA Y CÁLCULOS AVANZADOS
@@ -49,8 +53,6 @@ def calcular_e1rm(peso: float, reps: int) -> float:
 def calcular_acwr(cargas_diarias: list) -> dict:
     """
     Calcula el Acute:Chronic Workload Ratio (ACWR).
-    - Carga Aguda: Suma de sRPE de los últimos 7 días.
-    - Carga Crónica: Promedio semanal de los últimos 28 días.
     """
     if not cargas_diarias or len(cargas_diarias) == 0:
         return {"aguda": 0.0, "cronica": 0.0, "acwr": 1.0, "estado": "Sin datos", "color": "#94A3B8"}
@@ -63,7 +65,6 @@ def calcular_acwr(cargas_diarias: list) -> dict:
     fecha_limite_cronica = hoy - timedelta(days=28)
     fecha_limite_aguda = hoy - timedelta(days=7)
     
-    # Agrupamos por día sumando sRPE
     df_diario = df.groupby("fecha")["srpe"].sum().reset_index()
     
     # Carga Aguda (7 días)
@@ -77,19 +78,18 @@ def calcular_acwr(cargas_diarias: list) -> dict:
     
     acwr = round(carga_aguda / carga_cronica, 2)
     
-    # Clasificación por semáforo de lesión
     if acwr < 0.8:
         estado = "Subentrenamiento ⚠️ (Bajo estímulo)"
-        color = "#38BDF8" # Celeste
+        color = "#38BDF8"
     elif 0.8 <= acwr <= 1.3:
         estado = "Zona Segura ✅ (Rendimiento Óptimo)"
-        color = "#4ADE80" # Verde
+        color = "#4ADE80"
     elif 1.3 < acwr <= 1.5:
         estado = "Zona de Transición 🟡 (Alerta)"
-        color = "#FACC15" # Amarillo
+        color = "#FACC15"
     else:
         estado = "Peligro de Lesión 🚨 (Sobrecarga Aguda)"
-        color = "#F87171" # Rojo
+        color = "#F87171"
         
     return {"aguda": round(carga_aguda, 1), "cronica": round(carga_cronica, 1), "acwr": acwr, "estado": estado, "color": color}
 
@@ -222,7 +222,7 @@ if not st.session_state["autenticado"]:
             reg_peso = st.number_input("Peso Actual (kg):", min_value=1.0, value=70.0)
             reg_altura = st.number_input("Altura Actual (m):", min_value=0.5, value=1.75)
             reg_deporte = st.text_input("Deporte / Disciplina:")
-            reg_obj = st.text_area("Objetivo principal (¿Qué querés lograr entrenando con Giuliano?):")
+            reg_obj = st.text_area("Objetivo principal:")
             foto_subida = st.file_uploader("📸 Subí tu Foto de Perfil (Opcional):", type=["jpg", "jpeg", "png", "webp"])
             
             btn_reg_submit = st.button("Enviar Registro 👤", use_container_width=True, type="primary")
@@ -357,24 +357,39 @@ def renderizar_tabla_entrenamiento(nombre_atleta, es_espejo=False):
         st.info(f"💡 Carga de entrenamiento calculada (sRPE): **{srpe_calculado}** unidades arbitrarias (RPE {rpe} x {duracion} min).")
         
         if st.button("🏁 FINALIZAR ENTRENAMIENTO", use_container_width=True, type="primary"):
-            fecha_hoy = obtener_fecha_hora_actual().strftime("%Y-%m-%d")
-            res_comp = supabase.table("registros_entrenamiento").select("id").eq("alumno", nombre_atleta).like("fecha", f"{fecha_hoy}%").execute()
-            if res_comp.data: st.error("⚠️ Ya registraste una sesión hoy.")
+            fecha_hoy_texto = obtener_fecha_hora_actual().strftime("%Y-%m-%d")
+            
+            # --- CORRECCIÓN CLAVE: Verificamos contra la tabla Asistencia que solo guarda la fecha limpia ---
+            res_comp = supabase.table("asistencia").select("id").eq("alumno", nombre_atleta).eq("fecha", fecha_hoy_texto).execute()
+            
+            if res_comp.data: 
+                st.error("⚠️ Ya registraste una sesión hoy.")
             else:
                 validos = [d for d in entradas_alumno.values() if d["kilos"] > 0 or d["reps_reales"] > 0]
-                if not validos: st.warning("Cargá marcas antes de guardar.")
+                if not validos: 
+                    st.warning("Cargá marcas antes de guardar.")
                 else:
-                    fh = obtener_fecha_hora_actual().strftime("%Y-%m-%d %H:%M")
+                    # Guardamos la fecha con la zona horaria de Argentina explícita para evitar que Supabase la altere
+                    fecha_argentina_iso = obtener_fecha_iso_argentina()
                     mes_ano = obtener_fecha_hora_actual().strftime("%m-%Y")
+                    
                     for d in validos:
                         supabase.table("registros_entrenamiento").insert({
-                            "fecha": fh, "alumno": nombre_atleta, "nombre_rutina": rutina_completa[0]["nombre_rutina"],
-                            "ejercicio": d["ejercicio"], "nro_serie": d["serie"], "kilos": d["kilos"],
-                            "reps_reales": d["reps_reales"], "notas": d.get("notas", ""), 
-                            "rpe_global_sesion": rpe, "duracion_minutos": duracion, "srpe": srpe_calculado
+                            "fecha": fecha_argentina_iso, 
+                            "alumno": nombre_atleta, 
+                            "nombre_rutina": rutina_completa[0]["nombre_rutina"],
+                            "ejercicio": d["ejercicio"], 
+                            "nro_serie": d["serie"], 
+                            "kilos": d["kilos"],
+                            "reps_reales": d["reps_reales"], 
+                            "notas": d.get("notas", ""), 
+                            "rpe_global_sesion": rpe, 
+                            "duracion_minutos": duracion, 
+                            "srpe": srpe_calculado
                         }).execute()
                     
-                    supabase.table("asistencia").insert({"fecha": fecha_hoy, "mes_ano": mes_ano, "alumno": nombre_atleta}).execute()
+                    # Guardamos asistencia limpia
+                    supabase.table("asistencia").insert({"fecha": fecha_hoy_texto, "mes_ano": mes_ano, "alumno": nombre_atleta}).execute()
                     supabase.table("notificaciones").insert({"destinatario": "giuliano", "mensaje": f"🏃 {nombre_atleta} finalizó su sesión con sRPE = {srpe_calculado}."}).execute()
                     
                     res_tot = supabase.table("asistencia").select("id", count="exact").eq("alumno", nombre_atleta).eq("mes_ano", mes_ano).execute()
@@ -477,7 +492,7 @@ elif st.session_state["rol_actual"] == "admin":
             if rt.data:
                 df_t = pd.DataFrame(rt.data)
                 
-                # --- PARCHE DE SEGURIDAD PARA LA COLUMNA SRPE ---
+                # Parche de seguridad para sRPE
                 if "srpe" not in df_t.columns:
                     df_t["srpe"] = 0.0
                 else:
@@ -509,7 +524,7 @@ elif st.session_state["rol_actual"] == "admin":
                             d_gl = ses_data.iloc[0].get("duracion_minutos", "N/A")
                             sr_gl = ses_data.iloc[0].get("srpe", "N/A")
                             st.markdown(f"**RPE Sesión:** {r_gl}/10 | **Duración:** {d_gl} min | **sRPE:** {sr_gl} U.A.")
-                        st.dataframe(ses_data[["ejercicio","nro_serie","kilos","reps_reales","notas"]], hide_index=True)
+                        st.dataframe(ses_data[["ejercicio","nro_serie","kilos","reps_reales","notes" if "notes" in ses_data.columns else "notas"]], hide_index=True)
             else:
                 st.info("El atleta aún no posee sesiones grabadas.")
 
@@ -522,7 +537,6 @@ elif st.session_state["rol_actual"] == "admin":
             with c1: dia = st.selectbox("Día:", DIAS_PLANIF)
             with c2: blo = st.selectbox("Bloque:", SUB_BLOQUES)
             
-            # --- RESTABLECIDO: SELECCIÓN INTELIGENTE DE EJERCICIOS ---
             tipo_carga = st.radio(
                 "Modo de selección de ejercicio:", 
                 ["🔍 Buscar en Biblioteca por Patrón", "✍️ Escribir Ejercicio Manualmente (Libre / Aeróbico)"], 
