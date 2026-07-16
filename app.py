@@ -1,10 +1,11 @@
 import streamlit as st
 from supabase import create_client, Client
 import pandas as pd
+import numpy as np
 import bcrypt
 import random
 import time
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import pytz
 
 # ==========================================
@@ -26,14 +27,74 @@ supabase = init_supabase()
 # ==========================================
 # ⏰ RELOJ OFICIAL EN ZONA HORARIA DE ARGENTINA
 # ==========================================
-TZ_ARG = pytz.timezone('America/Argentina/Buenos_Aires')
+TZ_ARG = pytz.timezone("America/Argentina/Buenos_Aires")
 
 def obtener_fecha_hora_actual():
     """Retorna el objeto datetime localizado exactamente en Argentina."""
     return datetime.now(TZ_ARG)
 
 # ==========================================
-# 🔑 HELPERS DE SEGURIDAD Y CÁLCULOS
+# 📊 METRICAS DE CARGA Y CÁLCULOS AVANZADOS
+# ==========================================
+def calcular_srpe(rpe: float, duracion: float) -> float:
+    """Calcula el Session RPE (Carga de la Sesión)."""
+    return float(rpe * duracion)
+
+def calcular_e1rm(peso: float, reps: int) -> float:
+    """Estimación de 1RM por Epley (Brzycki Modificado)."""
+    if reps == 0: return 0.0
+    if reps == 1: return float(peso)
+    return round(peso * (1 + reps / 30.0), 1)
+
+def calcular_acwr(cargas_diarias: list) -> dict:
+    """
+    Calcula el Acute:Chronic Workload Ratio (ACWR).
+    - Carga Aguda: Suma de sRPE de los últimos 7 días.
+    - Carga Crónica: Promedio semanal de los últimos 28 días.
+    """
+    if not cargas_diarias or len(cargas_diarias) == 0:
+        return {"aguda": 0.0, "cronica": 0.0, "acwr": 1.0, "estado": "Sin datos", "color": "#94A3B8"}
+    
+    hoy = obtener_fecha_hora_actual().date()
+    df = pd.DataFrame(cargas_diarias)
+    df["fecha"] = pd.to_datetime(df["fecha"]).dt.date
+    
+    # Rango de fechas
+    fecha_limite_cronica = hoy - timedelta(days=28)
+    fecha_limite_aguda = hoy - timedelta(days=7)
+    
+    # Agrupamos por día sumando sRPE
+    df_diario = df.groupby("fecha")["srpe"].sum().reset_index()
+    
+    # Carga Aguda (7 días)
+    df_aguda = df_diario[df_diario["fecha"] >= fecha_limite_aguda]
+    carga_aguda = df_aguda["srpe"].sum()
+    
+    # Carga Crónica (4 semanas)
+    df_cronica = df_diario[(df_diario["fecha"] >= fecha_limite_cronica)]
+    carga_cronica = df_cronica["srpe"].sum() / 4.0 if not df_cronica.empty else 1.0
+    if carga_cronica == 0: carga_cronica = 1.0
+    
+    acwr = round(carga_aguda / carga_cronica, 2)
+    
+    # Clasificación por semáforo de lesión
+    if acwr < 0.8:
+        estado = "Subentrenamiento ⚠️ (Bajo estímulo)"
+        color = "#38BDF8" # Celeste
+    elif 0.8 <= acwr <= 1.3:
+        estado = "Zona Segura ✅ (Rendimiento Óptimo)"
+        color = "#4ADE80" # Verde
+    elif 1.3 < acwr <= 1.5:
+        estado = "Zona de Transición 🟡 (Alerta)"
+        color = "#FACC15" # Amarillo
+    else:
+        estado = "Peligro de Lesión 🚨 (Sobrecarga Aguda)"
+        color = "#F87171" # Rojo
+        
+    return {"aguda": round(carga_aguda, 1), "cronica": round(carga_cronica, 1), "acwr": acwr, "estado": estado, "color": color}
+
+# ==========================================
+# 🔑 SEGURIDAD, UTILS Y EDAD
 # ==========================================
 def hashear_password(password: str) -> str:
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
@@ -43,11 +104,6 @@ def verificar_password(password_ingresada: str, hash_guardado: str) -> bool:
         return bcrypt.checkpw(password_ingresada.encode(), hash_guardado.encode())
     except (ValueError, AttributeError):
         return password_ingresada == hash_guardado
-
-def calcular_e1rm(peso, reps):
-    if reps == 0: return 0.0
-    if reps == 1: return float(peso)
-    return round(peso * (1 + reps / 30.0), 1)
 
 def calcular_edad(fecha_nac_str):
     try:
@@ -72,7 +128,7 @@ def obtener_frase_motivacional(dias_acumulados):
     return random.choice(frases)
 
 # ==========================================
-# 📸 HELPER PARA STORAGE (SUBIR FOTO)
+# 📸 STORAGE (SUBIR FOTO DE PERFIL)
 # ==========================================
 def subir_foto_perfil(archivo_imagen, usuario_slug) -> str:
     try:
@@ -92,7 +148,7 @@ def subir_foto_perfil(archivo_imagen, usuario_slug) -> str:
         return None
 
 # ==========================================
-# 0. CONSTANTES Y CONFIGURACIÓN
+# 0. CONFIGURACIÓN INICIAL
 # ==========================================
 DIAS_PLANIF = ["📅 Día 1", "📅 Día 2", "🏃 Día Aeróbico"]
 SUB_BLOQUES = ["🔥 Entrada en Calor", "⚡ Bloque Principal", "🧘 Bloque Final / Vuelta a la Calma"]
@@ -290,9 +346,15 @@ def renderizar_tabla_entrenamiento(nombre_atleta, es_espejo=False):
                     st.divider()
 
     if visibles:
-        st.markdown("#### 📊 Evaluación")
-        rpe = st.select_slider("RPE Global:", options=list(range(1, 11)), value=7)
-        duracion = st.number_input("Minutos:", min_value=1, value=60)
+        st.markdown("#### 📊 Evaluación de la Carga de Trabajo")
+        col_ev1, col_ev2 = st.columns(2)
+        with col_ev1:
+            rpe = st.select_slider("RPE Global de la Sesión (Esfuerzo Percibido 1-10):", options=list(range(1, 11)), value=7)
+        with col_ev2:
+            duracion = st.number_input("Duración de la Sesión (minutos):", min_value=1, value=60)
+            
+        srpe_calculado = calcular_srpe(rpe, duracion)
+        st.info(f"💡 Carga de entrenamiento calculada (sRPE): **{srpe_calculado}** unidades arbitrarias (RPE {rpe} x {duracion} min).")
         
         if st.button("🏁 FINALIZAR ENTRENAMIENTO", use_container_width=True, type="primary"):
             fecha_hoy = obtener_fecha_hora_actual().strftime("%Y-%m-%d")
@@ -308,13 +370,13 @@ def renderizar_tabla_entrenamiento(nombre_atleta, es_espejo=False):
                         supabase.table("registros_entrenamiento").insert({
                             "fecha": fh, "alumno": nombre_atleta, "nombre_rutina": rutina_completa[0]["nombre_rutina"],
                             "ejercicio": d["ejercicio"], "nro_serie": d["serie"], "kilos": d["kilos"],
-                            "reps_reales": d["reps_reales"], "notas": d.get("notas", ""), "rpe_global_sesion": rpe, "duracion_minutos": duracion
+                            "reps_reales": d["reps_reales"], "notas": d.get("notas", ""), 
+                            "rpe_global_sesion": rpe, "duracion_minutos": duracion, "srpe": srpe_calculado
                         }).execute()
                     
                     supabase.table("asistencia").insert({"fecha": fecha_hoy, "mes_ano": mes_ano, "alumno": nombre_atleta}).execute()
-                    supabase.table("notificaciones").insert({"destinatario": "giuliano", "mensaje": f"🏃 {nombre_atleta} finalizó su sesión."}).execute()
+                    supabase.table("notificaciones").insert({"destinatario": "giuliano", "mensaje": f"🏃 {nombre_atleta} finalizó su sesión con sRPE = {srpe_calculado}."}).execute()
                     
-                    # Sincronización racha
                     res_tot = supabase.table("asistencia").select("id", count="exact").eq("alumno", nombre_atleta).eq("mes_ano", mes_ano).execute()
                     total = res_tot.count if res_tot.count is not None else 0
                     st.session_state["msj_pop"] = obtener_frase_motivacional(total)
@@ -342,6 +404,7 @@ if st.session_state["rol_actual"] == "atleta":
         st.markdown(f"### 👋 ¡Hola, **{al}**!")
         st.markdown(f"<p style='color: #84CC16; font-weight: bold;'>🎯 Meta: {obj} ({dep})</p>", unsafe_allow_html=True)
     
+    # Hemos removido la pestaña de VBT por completo
     t1, t2, t3, t4 = st.tabs(["🏋️‍♂️ Mi Sesión", "📈 Mi Progreso", "💬 Dudas", "⚙️ Perfil"])
     with t1: renderizar_tabla_entrenamiento(al)
     with t2:
@@ -351,8 +414,33 @@ if st.session_state["rol_actual"] == "atleta":
             df = pd.DataFrame(rh.data)
             df["e1rm"] = df.apply(lambda r: calcular_e1rm(r["kilos"], r["reps_reales"]), axis=1)
             df["fc"] = df["fecha"].apply(lambda f: f.split(" ")[0])
-            ej = st.selectbox("Ejercicio:", sorted(df["ejercicio"].unique()))
-            st.line_chart(df[df["ejercicio"]==ej].groupby("fc")["e1rm"].max())
+            
+            sub_col1, sub_col2 = st.columns(2)
+            with sub_col1:
+                st.markdown("#### Historial de Fuerza Estimada (e1RM)")
+                ej = st.selectbox("Ejercicio:", sorted(df["ejercicio"].unique()))
+                st.line_chart(df[df["ejercicio"]==ej].groupby("fc")["e1rm"].max())
+            
+            with sub_col2:
+                st.markdown("#### Historial de Carga del Entrenamiento (sRPE)")
+                df_srpe = df.drop_duplicates(subset=["fc"]).groupby("fc")["srpe"].sum().reset_index()
+                st.bar_chart(df_srpe.set_index("fc"))
+                
+            st.markdown("---")
+            st.markdown("### 🚦 Tu Balance de Carga de Trabajo (ACWR)")
+            res_all_srpe = supabase.table("registros_entrenamiento").select("fecha, srpe").eq("alumno", al).execute()
+            if res_all_srpe.data:
+                acwr_res = calcular_acwr(res_all_srpe.data)
+                col_st1, col_st2, col_st3 = st.columns(3)
+                with col_st1:
+                    st.metric("Carga Aguda (7d)", f"{acwr_res['aguda']} U.A.")
+                with col_st2:
+                    st.metric("Carga Crónica (28d)", f"{acwr_res['cronica']} U.A.")
+                with col_st3:
+                    st.metric("ACWR", acwr_res["acwr"])
+                st.markdown(f"**Estado actual:** <span style='color:{acwr_res['color']}; font-weight:bold; font-size:1.1em;'>{acwr_res['estado']}</span>", unsafe_allow_html=True)
+                st.caption("El ACWR ideal se sitúa entre 0.8 y 1.3. Valores superiores a 1.5 multiplican el riesgo de lesión.")
+    
     with t3:
         with st.form("msg"):
             m = st.text_area("Consulta:")
@@ -369,24 +457,51 @@ if st.session_state["rol_actual"] == "atleta":
                 st.rerun()
 
 # ==========================================
-# 🚀 PANTALLA ADMIN
+# 🚀 PANTALLA ADMIN (COACH)
 # ==========================================
 elif st.session_state["rol_actual"] == "admin":
     res_ap = supabase.table("alumnos").select("nombre_apellido").eq("estado", "aprobado").order("nombre_apellido").execute()
     list_al = [f["nombre_apellido"] for f in res_ap.data]
     list_al_n = ["- Seleccionar -"] + list_al
 
-    ta1, ta2, ta3, ta4, ta5, ta6 = st.tabs(["📊 Historial", "📝 Planificar", "💬 Mensajes", "👥 Atletas", "✅ Aprobaciones", "📚 Biblioteca"])
+    ta1, ta2, ta3, ta4, ta5, ta6 = st.tabs(["📊 Historial y Carga", "📝 Planificar", "💬 Mensajes", "👥 Atletas", "✅ Aprobaciones", "📚 Biblioteca"])
     
     with ta1:
+        st.markdown("### 📊 Panel de Control e Inteligencia de Carga de Trabajo")
         al_r = st.selectbox("Auditar Atleta:", list_al_n)
         if al_r != "- Seleccionar -":
-            rt = supabase.table("registros_entrenamiento").select("*").eq("alumno", al_r).order("id", desc=True).execute()
+            rt = supabase.table("registros_entrenamiento").select("*").eq("alumno", al_r).order("fecha", desc=True).execute()
             if rt.data:
                 df_t = pd.DataFrame(rt.data)
+                
+                df_clean = df_t.dropna(subset=["srpe"])
+                if not df_clean.empty:
+                    acwr_data = calcular_acwr(df_clean.to_dict('records'))
+                    
+                    st.markdown("#### 🚥 Dashboard de Carga & Salud Articular/Muscular")
+                    c_m1, c_m2, c_m3 = st.columns(3)
+                    with c_m1:
+                        st.metric("Carga Aguda (7 días)", f"{acwr_data['aguda']} U.A.")
+                    with c_m2:
+                        st.metric("Carga Crónica (28 días)", f"{acwr_data['cronica']} U.A.")
+                    with c_m3:
+                        st.metric("ACWR Ratio", acwr_data["acwr"])
+                        
+                    st.markdown(f"**Estado Clínico de Carga:** <span style='color:{acwr_data['color']}; font-weight:bold; font-size:1.15em;'>{acwr_data['estado']}</span>", unsafe_allow_html=True)
+                    st.divider()
+                
+                st.markdown("#### 📂 Historial de Sesiones")
                 for f in df_t["fecha"].unique():
-                    with st.expander(f"Session {f}"):
-                        st.dataframe(df_t[df_t["fecha"]==f][["ejercicio","nro_serie","kilos","reps_reales","notas"]], hide_index=True)
+                    with st.expander(f"Sesión - {f}"):
+                        ses_data = df_t[df_t["fecha"]==f]
+                        if "rpe_global_sesion" in ses_data.columns and not ses_data.empty:
+                            r_gl = ses_data.iloc[0].get("rpe_global_sesion", "N/A")
+                            d_gl = ses_data.iloc[0].get("duracion_minutos", "N/A")
+                            sr_gl = ses_data.iloc[0].get("srpe", "N/A")
+                            st.markdown(f"**RPE Sesión:** {r_gl}/10 | **Duración:** {d_gl} min | **sRPE:** {sr_gl} U.A.")
+                        st.dataframe(ses_data[["ejercicio","nro_serie","kilos","reps_reales","notas"]], hide_index=True)
+            else:
+                st.info("El atleta aún no posee sesiones grabadas.")
 
     with ta2:
         al_p = st.selectbox("Planificar para:", list_al_n)
