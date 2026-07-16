@@ -25,17 +25,13 @@ def init_supabase() -> Client:
 supabase = init_supabase()
 
 # ==========================================
-# ⏰ RELOJ OFICIAL EN ZONA HORARIA DE ARGENTINA (CONSOLIDADOR)
+# ⏰ RELOJ OFICIAL EN ZONA HORARIA DE ARGENTINA
 # ==========================================
 TZ_ARG = pytz.timezone("America/Argentina/Buenos_Aires")
 
 def obtener_fecha_hora_actual():
     """Retorna el objeto datetime localizado exactamente en Argentina."""
     return datetime.now(TZ_ARG)
-
-def obtener_fecha_iso_argentina():
-    """Retorna la fecha y hora formateada de forma segura para base de datos (con timezone offset)."""
-    return obtener_fecha_hora_actual().strftime("%Y-%m-%d %H:%M:%S-03:00")
 
 # ==========================================
 # 📊 METRICAS DE CARGA Y CÁLCULOS AVANZADOS
@@ -53,34 +49,34 @@ def calcular_e1rm(peso: float, reps: int) -> float:
 def calcular_acwr(cargas_diarias: list) -> dict:
     """
     Calcula el Acute:Chronic Workload Ratio (ACWR).
-    - Carga Aguda: Suma de sRPE de los últimos 7 días.
-    - Carga Crónica: Promedio semanal de los últimos 28 días.
     """
     if not cargas_diarias or len(cargas_diarias) == 0:
         return {"aguda": 0.0, "cronica": 0.0, "acwr": 1.0, "estado": "Sin datos", "color": "#94A3B8"}
     
     hoy = obtener_fecha_hora_actual().date()
     df = pd.DataFrame(cargas_diarias)
-    df["fecha"] = pd.to_datetime(df["fecha"]).dt.date
+    
+    # Normalizamos la fecha de manera segura extrayendo solo el día
+    df["fecha_limpia"] = df["fecha"].apply(lambda x: str(x).split(" ")[0])
+    df["fecha_limpia"] = pd.to_datetime(df["fecha_limpia"]).dt.date
     
     # Rango de fechas
     fecha_limite_cronica = hoy - timedelta(days=28)
     fecha_limite_aguda = hoy - timedelta(days=7)
     
-    df_diario = df.groupby("fecha")["srpe"].sum().reset_index()
+    df_diario = df.groupby("fecha_limpia")["srpe"].sum().reset_index()
     
     # Carga Aguda (7 días)
-    df_aguda = df_diario[df_diario["fecha"] >= fecha_limite_aguda]
+    df_aguda = df_diario[df_diario["fecha_limpia"] >= fecha_limite_aguda]
     carga_aguda = df_aguda["srpe"].sum()
     
     # Carga Crónica (4 semanas)
-    df_cronica = df_diario[(df_diario["fecha"] >= fecha_limite_cronica)]
+    df_cronica = df_diario[(df_diario["fecha_limpia"] >= fecha_limite_cronica)]
     carga_cronica = df_cronica["srpe"].sum() / 4.0 if not df_cronica.empty else 1.0
     if carga_cronica == 0: carga_cronica = 1.0
     
     acwr = round(carga_aguda / carga_cronica, 2)
     
-    # Clasificación por semáforo de lesión
     if acwr < 0.8:
         estado = "Subentrenamiento ⚠️ (Bajo estímulo)"
         color = "#38BDF8"
@@ -157,7 +153,7 @@ DIAS_PLANIF = ["📅 Día 1", "📅 Día 2", "🏃 Día Aeróbico"]
 SUB_BLOQUES = ["🔥 Entrada en Calor", "⚡ Bloque Principal", "🧘 Bloque Final / Vuelta a la Calma"]
 ADMIN_USER = "giuliano"
 ADMIN_PASS_PLANA = "magpower2026"
-AVATAR_PREDETERMINADO = "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&q=80&w=200&h=200"
+AVATAR_PREDETERMINADO = "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&get_q=80&w=200&h=200"
 
 if "borrador_rutina" not in st.session_state:
     st.session_state["borrador_rutina"] = []
@@ -360,10 +356,10 @@ def renderizar_tabla_entrenamiento(nombre_atleta, es_espejo=False):
         st.info(f"💡 Carga de entrenamiento calculada (sRPE): **{srpe_calculado}** unidades arbitrarias (RPE {rpe} x {duracion} min).")
         
         if st.button("🏁 FINALIZAR ENTRENAMIENTO", use_container_width=True, type="primary"):
-            fecha_hoy_texto = obtener_fecha_hora_actual().strftime("%Y-%m-%d")
+            fecha_hoy_limpia = obtener_fecha_hora_actual().strftime("%Y-%m-%d")
             
             # Verificamos contra la tabla Asistencia que solo guarda la fecha limpia para evitar duplicados
-            res_comp = supabase.table("asistencia").select("id").eq("alumno", nombre_atleta).eq("fecha", fecha_hoy_texto).execute()
+            res_comp = supabase.table("asistencia").select("id").eq("alumno", nombre_atleta).eq("fecha", fecha_hoy_limpia).execute()
             
             if res_comp.data: 
                 st.error("⚠️ Ya registraste una sesión hoy.")
@@ -372,13 +368,16 @@ def renderizar_tabla_entrenamiento(nombre_atleta, es_espejo=False):
                 if not validos: 
                     st.warning("Cargá marcas antes de guardar.")
                 else:
-                    # Guardamos la fecha con la zona horaria de Argentina explícita para evitar que Supabase la altere
-                    fecha_argentina_iso = obtener_fecha_iso_argentina()
+                    # CLAVE: Formateamos la hora como un string de texto plano simple. Supabase NO lo puede alterar.
+                    hora_limpia = obtener_fecha_hora_actual().strftime("%H:%M")
                     mes_ano = obtener_fecha_hora_actual().strftime("%m-%Y")
                     
                     for d in validos:
+                        # Guardamos en la base de datos combinando los dos textos estáticos: "FECHA HORA"
+                        fecha_y_hora_texto = f"{fecha_hoy_limpia} {hora_limpia}"
+                        
                         supabase.table("registros_entrenamiento").insert({
-                            "fecha": fecha_argentina_iso, 
+                            "fecha": fecha_y_hora_texto, 
                             "alumno": nombre_atleta, 
                             "nombre_rutina": rutina_completa[0]["nombre_rutina"],
                             "ejercicio": d["ejercicio"], 
@@ -391,8 +390,8 @@ def renderizar_tabla_entrenamiento(nombre_atleta, es_espejo=False):
                             "srpe": srpe_calculado
                         }).execute()
                     
-                    # Guardamos asistencia limpia
-                    supabase.table("asistencia").insert({"fecha": fecha_hoy_texto, "mes_ano": mes_ano, "alumno": nombre_atleta}).execute()
+                    # Guardamos asistencia con fecha limpia
+                    supabase.table("asistencia").insert({"fecha": fecha_hoy_limpia, "mes_ano": mes_ano, "alumno": nombre_atleta}).execute()
                     supabase.table("notificaciones").insert({"destinatario": "giuliano", "mensaje": f"🏃 {nombre_atleta} finalizó su sesión con sRPE = {srpe_calculado}."}).execute()
                     
                     res_tot = supabase.table("asistencia").select("id", count="exact").eq("alumno", nombre_atleta).eq("mes_ano", mes_ano).execute()
@@ -520,13 +519,15 @@ elif st.session_state["rol_actual"] == "admin":
                 
                 st.markdown("#### 📂 Historial de Sesiones")
                 for f in df_t["fecha"].unique():
-                    with st.expander(f"Sesión - {f}"):
+                    # Separamos fecha limpia para la cabecera
+                    fecha_visual = str(f).split(" ")[0]
+                    with st.expander(f"Sesión - {fecha_visual}"):
                         ses_data = df_t[df_t["fecha"]==f]
                         if "rpe_global_sesion" in ses_data.columns and not ses_data.empty:
                             r_gl = ses_data.iloc[0].get("rpe_global_sesion", "N/A")
                             d_gl = ses_data.iloc[0].get("duracion_minutos", "N/A")
                             sr_gl = ses_data.iloc[0].get("srpe", "N/A")
-                            st.markdown(f"**RPE Sesión:** {r_gl}/10 | **Duración:** {d_gl} min | **sRPE:** {sr_gl} U.A.")
+                            st.markdown(f"**RPE:** {r_gl}/10 | **Duración:** {d_gl} min | **sRPE:** {sr_gl} U.A.")
                         st.dataframe(ses_data[["ejercicio","nro_serie","kilos","reps_reales","notes" if "notes" in ses_data.columns else "notas"]], hide_index=True)
             else:
                 st.info("El atleta aún no posee sesiones grabadas.")
