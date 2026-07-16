@@ -3,4 +3,4 @@ pandas
 bcrypt
 openpyxl
 supabase
-pitz
+pytz
