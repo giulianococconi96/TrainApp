@@ -389,6 +389,7 @@ def renderizar_tabla_entrenamiento(nombre_atleta, es_espejo=False):
                     max_e1rm = 0.0
                     mejor_ej_e1rm = ""
                     
+                    # 1. Guardamos marcas de cada serie en Supabase
                     for datos in datos_validos:
                         supabase.table("registros_entrenamiento").insert({
                             "fecha": fecha_actual, "alumno": nombre_atleta, "nombre_rutina": nombre_reporte_dia,
@@ -402,18 +403,22 @@ def renderizar_tabla_entrenamiento(nombre_atleta, es_espejo=False):
                             max_e1rm = e1rm_calc
                             mejor_ej_e1rm = datos["ejercicio"]
                     
+                    # 2. Registramos la asistencia del día actual de forma segura
                     supabase.table("asistencia").insert({
                         "fecha": fecha_hoy_texto, "mes_ano": mes_ano_actual, "alumno": nombre_atleta
                     }).execute()
                     
+                    # 3. Notificamos a Giuliano
                     supabase.table("notificaciones").insert({
                         "destinatario": "giuliano",
                         "mensaje": f"🏃 {nombre_atleta} finalizó su entrenamiento: {nombre_reporte_dia}."
                     }).execute()
                     
+                    # 4. SOLUCIÓN DESINCRONIZACIÓN: Consultamos las asistencias del mes RECIÉN AHORA (ya con el día de hoy computado)
                     res_tot = supabase.table("asistencia").select("id", count="exact").eq("alumno", nombre_atleta).eq("mes_ano", mes_ano_actual).execute()
                     total_dias = res_tot.count if res_tot.count is not None else len(res_tot.data)
                     
+                    # 5. Armamos el mensaje motivacional con el número exacto y real de asistencias
                     msg_motivacional = obtener_frase_motivacional(total_dias)
                     if max_e1rm > 0:
                         msg_motivacional += f"\n\n🔥 **Hito de Fuerza hoy:** Tu 1RM estimado en *{mejor_ej_e1rm}* llegó a **{max_e1rm} kg**. ¡Excelente!"
@@ -421,13 +426,6 @@ def renderizar_tabla_entrenamiento(nombre_atleta, es_espejo=False):
                     st.session_state["mensaje_motivacional_pop"] = msg_motivacional
                     st.success("🚀 ¡Entrenamiento enviado correctamente al Profe!")
                     st.rerun()
-
-if "mensaje_motivacional_pop" in st.session_state:
-    st.balloons()
-    st.toast(st.session_state["mensaje_motivacional_pop"], icon="🏆")
-    st.markdown(f"<div style='background-color: #1E293B; border-left: 5px solid #84CC16; padding: 15px; border-radius: 4px; margin-bottom: 20px;'><strong>🏅 DESEMPEÑO DEL DÍA:</strong><br/>{st.session_state['mensaje_motivacional_pop']}</div>", unsafe_allow_html=True)
-    del st.session_state["mensaje_motivacional_pop"]
-
 # ==========================================
 # 🚀 PANTALLAS SEGÚN ROL (ATLETA)
 # ==========================================
