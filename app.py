@@ -5,7 +5,7 @@ import bcrypt
 import random
 import time
 from datetime import datetime, date
-import pyts
+import pytz
 
 # ==========================================
 # 🔑 CONEXIÓN A SUPABASE (DESDE SECRETS)
