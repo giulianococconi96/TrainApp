@@ -5,6 +5,7 @@ import bcrypt
 import random
 import time
 from datetime import datetime, date
+import pyts
 
 # ==========================================
 # 🔑 CONEXIÓN A SUPABASE (DESDE SECRETS)
@@ -293,6 +294,9 @@ def renderizar_tabla_entrenamiento(nombre_atleta, es_espejo=False):
     entradas_alumno = {}
     ejercicios_visibles_en_pantalla = False
     
+    # Definimos la zona horaria de Argentina
+    tz_arg = pytz.timezone('America/Argentina/Buenos_Aires')
+    
     for sub_b in SUB_BLOQUES:
         llave_busqueda = f"{dia_a_entrenar}|{sub_b}"
         ejercicios_del_bloque = [r for r in rutina_completa if r["bloque"] == llave_busqueda]
@@ -300,6 +304,9 @@ def renderizar_tabla_entrenamiento(nombre_atleta, es_espejo=False):
         if ejercicios_del_bloque:
             ejercicios_visibles_en_pantalla = True
             st.markdown(f"<h4 style='color: #CCFF00; margin-top: 15px; margin-bottom: 10px; background-color: #1E293B; padding: 6px 10px; border-radius: 4px;'>{sub_b}</h4>", unsafe_allow_html=True)
+            
+            # Identificamos si es un bloque de control (Entrada en calor o Bloque Final)
+            es_bloque_secundario = "Principal" not in sub_b
             
             for idx, ej in enumerate(ejercicios_del_bloque):
                 nombre_ejercicio = ej["ejercicio"]
@@ -309,57 +316,80 @@ def renderizar_tabla_entrenamiento(nombre_atleta, es_espejo=False):
                 res_v = supabase.table("biblioteca_ejercicios").select("link_video").eq("nombre", nombre_ejercicio).execute()
                 link_video = res_v.data[0]["link_video"] if res_v.data else ""
                 
-                res_hist_prev = supabase.table("registros_entrenamiento").select("kilos, reps_reales, fecha").eq("alumno", nombre_atleta).eq("ejercicio", nombre_ejercicio).order("id", desc=True).limit(series_prescritas).execute()
+                # --- HISTORIAL DE CARGA (Solo aplica para el bloque principal) ---
                 texto_historial = ""
-                if res_hist_prev.data:
-                    hist_data = res_hist_prev.data
-                    detalles = ", ".join([f"{h['reps_reales']}R x {h['kilos']}kg" for h in reversed(hist_data)])
-                    texto_historial = f"⏮️ Última sesión ({hist_data[0]['fecha'].split(' ')[0]}): {detalles}"
-                else:
-                    texto_historial = "⏮️ Sin cargas anteriores registradas para este ejercicio."
+                if not es_bloque_secundario:
+                    res_hist_prev = supabase.table("registros_entrenamiento").select("kilos, reps_reales, fecha").eq("alumno", nombre_atleta).eq("ejercicio", nombre_ejercicio).order("id", desc=True).limit(series_prescritas).execute()
+                    if res_hist_prev.data:
+                        hist_data = res_hist_prev.data
+                        detalles = ", ".join([f"{h['reps_reales']}R x {h['kilos']}kg" for h in reversed(hist_data)])
+                        texto_historial = f"⏮️ Última sesión ({hist_data[0]['fecha'].split(' ')[0]}): {detalles}"
+                    else:
+                        texto_historial = "⏮️ Sin cargas anteriores registradas para este ejercicio."
                 
                 with st.container():
                     col_h1, col_h2 = st.columns([3, 1])
                     with col_h1: 
-                        st.markdown(f"🏋️‍♂️ **{nombre_ejercicio}** | `{series_prescritas}S x {reps_prescritas}R` Prescritas")
+                        st.markdown(f"🏋️‍♂️ **{nombre_ejercicio}** | `{series_prescritas}S x {reps_prescritas}` Prescritas")
                     with col_h2:
                         if link_video and "http" in link_video: st.markdown(f"[🎥 Video]({link_video})")
                     
-                    st.markdown(f"<p style='font-size: 0.85rem; color: #94A3B8; margin-top: -8px; margin-bottom: 8px;'>{texto_historial}</p>", unsafe_allow_html=True)
-                    
-                    columnas_visuales = st.columns(series_prescritas)
-                    
-                    for s in range(1, series_prescritas + 1):
-                        with columnas_visuales[s-1]:
-                            st.markdown(f"<p style='text-align: center; margin-bottom: 1px; font-weight: bold; color: #CCFF00;'>S{s}</p>", unsafe_allow_html=True)
-                            key_id = f"{sufijo}_{nombre_atleta}_{idx}_{nombre_ejercicio.replace(' ', '_')}_s{s}"
-                            
-                            kilos_input = st.number_input(
-                                "kg", min_value=0.0, step=0.5, value=0.0, 
-                                key=f"k_{key_id}", label_visibility="collapsed"
-                            )
-                            
-                            try: default_reps = int(reps_prescritas)
-                            except: default_reps = 5
-                            
-                            reps_reales = st.number_input(
-                                "R", min_value=0, max_value=100, value=default_reps, 
-                                key=f"rep_{key_id}", label_visibility="collapsed"
-                            )
-                            
-                            entradas_alumno[(nombre_ejercicio, s)] = {
-                                "ejercicio": nombre_ejercicio, "serie": s, "kilos": kilos_input, "reps_reales": reps_reales
-                            }
+                    if texto_historial:
+                        st.markdown(f"<p style='font-size: 0.85rem; color: #94A3B8; margin-top: -8px; margin-bottom: 8px;'>{texto_historial}</p>", unsafe_allow_html=True)
                     
                     nombre_ej_limpio = nombre_ejercicio.replace(" ", "_").replace("[", "").replace("]", "").replace("-", "")
                     dia_limpio = dia_a_entrenar.replace(" ", "_").replace("📅", "").replace("🏃", "")
                     sub_b_limpio = sub_b.replace(" ", "_").replace("🔥", "").replace("⚡", "").replace("🧘", "")
                     
+                    # --- DISEÑO SEGÚN TIPO DE BLOQUE ---
+                    if es_bloque_secundario:
+                        # Entrada en calor / Vuelta a la calma: Solo checkbox de verificación
+                        key_chk = f"chk_{sufijo}_{nombre_atleta}_{idx}_{nombre_ej_limpio}_{dia_limpio}_{sub_b_limpio}"
+                        completado = st.checkbox("✅ Marcar como Completado", key=key_chk)
+                        
+                        # Si está tildado, lo guardamos como completado (peso 0, reps reales igual a las prescritas)
+                        if completado:
+                            try: reps_numericas = int(reps_prescritas)
+                            except: reps_numericas = 10
+                            
+                            for s in range(1, series_prescritas + 1):
+                                entradas_alumno[(nombre_ejercicio, s)] = {
+                                    "ejercicio": nombre_ejercicio, "serie": s, "kilos": 0.0, "reps_reales": reps_numericas
+                                }
+                    else:
+                        # Bloque Principal: Carga de datos de alto rendimiento
+                        columnas_visuales = st.columns(series_prescritas)
+                        for s in range(1, series_prescritas + 1):
+                            with columnas_visuales[s-1]:
+                                st.markdown(f"<p style='text-align: center; margin-bottom: 1px; font-weight: bold; color: #CCFF00;'>S{s}</p>", unsafe_allow_html=True)
+                                key_id = f"{sufijo}_{nombre_atleta}_{idx}_{nombre_ejercicio.replace(' ', '_')}_s{s}"
+                                
+                                kilos_input = st.number_input(
+                                    "kg", min_value=0.0, step=0.5, value=0.0, 
+                                    key=f"k_{key_id}", label_visibility="collapsed"
+                                )
+                                
+                                try: default_reps = int(reps_prescritas)
+                                except: default_reps = 5
+                                
+                                reps_reales = st.number_input(
+                                    "R", min_value=0, max_value=100, value=default_reps, 
+                                    key=f"rep_{key_id}", label_visibility="collapsed"
+                                )
+                                
+                                entradas_alumno[(nombre_ejercicio, s)] = {
+                                    "ejercicio": nombre_ejercicio, "serie": s, "kilos": kilos_input, "reps_reales": reps_reales
+                                }
+                    
                     notas_ejercicio = st.text_input(
-                        "Anotaciones:", placeholder="Molestia, velocidad percibida...", 
+                        "Anotaciones:", placeholder="Sensaciones, ritmo, molestias...", 
                         key=f"not_{sufijo}_{idx}_{nombre_ej_limpio}_{dia_limpio}_{sub_b_limpio}"
                     )
-                    for s in range(1, series_prescritas + 1): entradas_alumno[(nombre_ejercicio, s)]["notes_field"] = notas_ejercicio
+                    
+                    # Asociamos las anotaciones al diccionario de datos
+                    for s in range(1, series_prescritas + 1):
+                        if (nombre_ejercicio, s) in entradas_alumno:
+                            entradas_alumno[(nombre_ejercicio, s)]["notes_field"] = notas_ejercicio
                     
                     st.markdown("<hr style='margin: 15px 0px; opacity: 0.15;'/>", unsafe_allow_html=True)
                     
@@ -375,21 +405,21 @@ def renderizar_tabla_entrenamiento(nombre_atleta, es_espejo=False):
     if st.button("🏁 FINALIZAR ENTRENAMIENTO Y ENVIAR AL PROFE", use_container_width=True, type="primary", key=f"btn_finalizar_{sufijo}"):
         if es_espejo: st.info("ℹ️ Modo espejo de visualización.")
         else:
-            fecha_hoy_texto = datetime.now().strftime("%Y-%m-%d")
+            fecha_hoy_texto = datetime.now(tz_arg).strftime("%Y-%m-%d")
             res_comp = supabase.table("registros_entrenamiento").select("id").eq("alumno", nombre_atleta).like("fecha", f"{fecha_hoy_texto}%").execute()
             if res_comp.data: st.error(f"⚠️ Ya registraste una sesión hoy.")
             else:
                 datos_validos = [d for d in entradas_alumno.values() if d["kilos"] > 0 or d["reps_reales"] > 0]
                 if not datos_validos: st.warning("⚠️ Completá marcas antes de guardar.")
                 else:
-                    fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M")
-                    mes_ano_actual = datetime.now().strftime("%m-%Y")
+                    fecha_actual = datetime.now(tz_arg).strftime("%Y-%m-%d %H:%M")
+                    mes_ano_actual = datetime.now(tz_arg).strftime("%m-%Y")
                     nombre_reporte_dia = f"{nombre_de_la_rutina} ({dia_a_entrenar})"
                     
                     max_e1rm = 0.0
                     mejor_ej_e1rm = ""
                     
-                    # 1. Guardamos marcas de cada serie en Supabase
+                    # 1. Guardamos marcas
                     for datos in datos_validos:
                         supabase.table("registros_entrenamiento").insert({
                             "fecha": fecha_actual, "alumno": nombre_atleta, "nombre_rutina": nombre_reporte_dia,
@@ -403,22 +433,22 @@ def renderizar_tabla_entrenamiento(nombre_atleta, es_espejo=False):
                             max_e1rm = e1rm_calc
                             mejor_ej_e1rm = datos["ejercicio"]
                     
-                    # 2. Registramos la asistencia del día actual de forma segura
+                    # 2. Registramos asistencia con fecha de Argentina
                     supabase.table("asistencia").insert({
                         "fecha": fecha_hoy_texto, "mes_ano": mes_ano_actual, "alumno": nombre_atleta
                     }).execute()
                     
-                    # 3. Notificamos a Giuliano
+                    # 3. Mandamos notificación al Profe
                     supabase.table("notificaciones").insert({
                         "destinatario": "giuliano",
                         "mensaje": f"🏃 {nombre_atleta} finalizó su entrenamiento: {nombre_reporte_dia}."
                     }).execute()
                     
-                    # 4. SOLUCIÓN DESINCRONIZACIÓN: Consultamos las asistencias del mes RECIÉN AHORA (ya con el día de hoy computado)
+                    # 4. Consultamos asistencias en vivo
                     res_tot = supabase.table("asistencia").select("id", count="exact").eq("alumno", nombre_atleta).eq("mes_ano", mes_ano_actual).execute()
                     total_dias = res_tot.count if res_tot.count is not None else len(res_tot.data)
                     
-                    # 5. Armamos el mensaje motivacional con el número exacto y real de asistencias
+                    # 5. Frase motivacional sincronizada
                     msg_motivacional = obtener_frase_motivacional(total_dias)
                     if max_e1rm > 0:
                         msg_motivacional += f"\n\n🔥 **Hito de Fuerza hoy:** Tu 1RM estimado en *{mejor_ej_e1rm}* llegó a **{max_e1rm} kg**. ¡Excelente!"
