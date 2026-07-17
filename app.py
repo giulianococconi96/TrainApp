@@ -824,7 +824,7 @@ elif st.session_state["rol_actual"] == "admin":
                             time.sleep(1)
                             st.rerun()
 
-    with ta6:
+   with ta6:
         st.markdown("### Biblioteca de Ejercicios")
         if st.button("Vaciar Biblioteca"):
             res_vac = ejecutar_seguro(supabase.table("biblioteca_ejercicios").delete().neq("id", 0))
@@ -836,18 +836,24 @@ elif st.session_state["rol_actual"] == "admin":
             df = pd.read_excel(f_xl) if f_xl.name.endswith(".xlsx") else pd.read_csv(f_xl)
             
             if not df.empty:
-                df = df.drop_duplicates(subset=[df.columns[0]]).copy()
+                # 🛡️ PASO 1: Limpiamos espacios y eliminamos duplicados dentro del mismo archivo Excel de forma case-insensitive
+                df.iloc[:, 0] = df.iloc[:, 0].astype(str).str.strip()
+                df = df.drop_duplicates(subset=[df.columns[0]], keep="first").copy()
                 
+                # 🛡️ PASO 2: Traemos los existentes y los convertimos TODOS a minúsculas para comparar de forma segura
                 res_existentes = ejecutar_seguro(supabase.table("biblioteca_ejercicios").select("nombre"))
-                existentes = set([str(e["nombre"]).strip().lower() for e in res_existentes.data]) if (res_existentes and res_existentes.data) else set()
+                existentes_db = [e["nombre"] for e in res_existentes.data] if (res_existentes and res_existentes.data) else []
+                existentes_normalizados = set(str(nombre).strip().lower() for nombre in existentes_db)
                 
                 lote = []
                 for _, r in df.iterrows():
                     nombre_ej = str(r.iloc[0]).strip()
-                    if nombre_ej and nombre_ej.lower() not in existentes:
+                    # Comparamos estrictamente en minúsculas para que "Sentadilla" y "sentadilla" se reconozcan como lo mismo
+                    if nombre_ej and nombre_ej.lower() not in existentes_normalizados:
                         grupo = str(r.iloc[1]).strip() if (len(r) > 1 and pd.notna(r.iloc[1])) else "General"
                         lote.append({"nombre": nombre_ej, "grupo_muscular": grupo})
                 
+                # 🛡️ PASO 3: Insertamos solo el neto de ejercicios nuevos
                 if lote:
                     res_carga = ejecutar_seguro(supabase.table("biblioteca_ejercicios").insert(lote), "No se pudo cargar el lote de ejercicios.")
                     if res_carga:
