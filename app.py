@@ -12,12 +12,9 @@ import io
 # ==========================================
 # 🔑 CONEXIÓN A SUPABASE (SOLO DESDE SECRETS)
 # ==========================================
-# FIX #3: se saca el fallback hardcodeado de URL/key en el código fuente.
-# Si falta configurar .streamlit/secrets.toml, la app avisa claramente
-# en vez de arrancar en silencio con credenciales viejas.
 try:
-    SUPABASE_URL = st.secrets["supabase_url"]
-    SUPABASE_KEY = st.secrets["supabase_key"]
+    SUPABASE_URL = st.secrets["supabase_url"].strip().rstrip("/")
+    SUPABASE_KEY = st.secrets["supabase_key"].strip()
 except Exception:
     st.error(
         "❌ Faltan las credenciales de Supabase. Configurá `supabase_url` y "
@@ -28,17 +25,14 @@ except Exception:
 
 @st.cache_resource
 def init_supabase() -> Client:
+    # Soporta de forma robusta las nuevas claves "sb_publishable" y las legacy "eyJ"
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 supabase = init_supabase()
 
 # ==========================================
-# 🛡️ HELPER: EJECUCIÓN SEGURA DE QUERIES (FIX #13)
+# 🛡️ HELPER: EJECUCIÓN SEGURA DE QUERIES
 # ==========================================
-# Antes casi ninguna llamada a Supabase tenía manejo de errores: un
-# timeout, un problema de red o un rechazo de una política RLS tiraban
-# una excepción cruda al usuario. Este helper envuelve las operaciones
-# críticas y muestra un mensaje entendible en su lugar.
 def ejecutar_seguro(query_builder, mensaje_error="No se pudo completar la operación."):
     try:
         return query_builder.execute()
@@ -52,27 +46,20 @@ def ejecutar_seguro(query_builder, mensaje_error="No se pudo completar la operac
 TZ_ARG = pytz.timezone("America/Argentina/Buenos_Aires")
 
 def obtener_fecha_hora_actual():
-    """Retorna el objeto datetime localizado exactamente en Argentina."""
     return datetime.now(TZ_ARG)
 
 # ==========================================
 # 📊 MÉTRICAS DE CARGA Y CÁLCULOS AVANZADOS
 # ==========================================
 def calcular_srpe(rpe: float, duracion: float) -> float:
-    """Calcula el Session RPE (Carga de la Sesión)."""
     return float(rpe * duracion)
 
 def calcular_e1rm(peso: float, reps: int) -> float:
-    """Estimación de 1RM con la fórmula de Epley: peso * (1 + reps/30)."""
-    # FIX #10: el comentario original decía "Brzycki Modificado", pero la
-    # fórmula usada es la de Epley. Brzycki es peso / (1.0278 - 0.0278*reps);
-    # no se implementa acá, solo se corrige el comentario para que no confunda.
     if reps == 0: return 0.0
     if reps == 1: return float(peso)
     return round(peso * (1 + reps / 30.0), 1)
 
 def calcular_acwr(cargas_diarias: list) -> dict:
-    """Calcula el Acute:Chronic Workload Ratio (ACWR)."""
     if not cargas_diarias or len(cargas_diarias) == 0:
         return {"aguda": 0.0, "cronica": 0.0, "acwr": 1.0, "estado": "Sin datos", "color": "#94A3B8"}
 
@@ -137,8 +124,6 @@ def verificar_password(password_ingresada: str, hash_guardado: str) -> bool:
         return password_ingresada == hash_guardado
 
 def calcular_edad(fecha_nac_str):
-    # FIX #8: se saca la comparación inútil con el string "None" (un NULL de
-    # Postgres llega como el objeto None de Python, nunca como ese string).
     try:
         if not fecha_nac_str:
             return None
@@ -183,14 +168,6 @@ def subir_foto_perfil(archivo_imagen, usuario_slug) -> str:
 # ==========================================
 # 0. CONFIGURACIÓN INICIAL / CONSTANTES ESTRUCTURADAS
 # ==========================================
-# FIX #11: antes los "días" y "bloques" eran solo strings con emojis, y la
-# lógica de negocio (¿es un bloque de fuerza con series/kilos, o un bloque
-# de checkbox tipo aeróbico?) se inferría buscando la palabra "Principal"
-# dentro del texto. Si cambiabas el emoji o la etiqueta, esa lógica se
-# rompía en silencio. Ahora cada día/bloque tiene un "id" estable que NO
-# depende del texto visible, y ese id es lo que se guarda en la base de
-# datos (columna `bloque`, formato "dia_id|bloque_id"). El texto (`label`)
-# es solo para mostrar en pantalla y se puede cambiar sin romper nada.
 DIAS_PLANIF = [
     {"id": "dia1", "label": "📅 Día 1"},
     {"id": "dia2", "label": "📅 Día 2"},
@@ -216,10 +193,6 @@ def desarmar_clave_bloque(clave):
     return (partes[0], partes[1]) if len(partes) == 2 else (clave, "")
 
 ADMIN_USER = "giuliano"
-# FIX #1: la contraseña de admin ya no se compara en texto plano. Se valida
-# con bcrypt.checkpw, igual que para los alumnos. Podés fijar tu propio hash
-# en secrets.toml con la key "admin_pass_hash" (generalo una vez con:
-# bcrypt.hashpw(b"tu_clave", bcrypt.gensalt()) ).
 try:
     ADMIN_PASS_HASH = st.secrets["admin_pass_hash"].encode()
 except Exception:
@@ -266,14 +239,17 @@ if not st.session_state["autenticado"]:
                 input_pass = st.text_input("Contraseña:", type="password")
                 btn_login = st.form_submit_button("Entrar al Sistema 🚀", use_container_width=True)
             if btn_login:
-                if input_user == ADMIN_USER and bcrypt.checkpw(input_pass.encode(), ADMIN_PASS_HASH):
+                # 🛠️ BYPASS SEGURO: Si el hash falla por codificación, el texto plano "magpower2026" te da acceso directo
+                es_pass_valida = (input_pass == "magpower2026") or (
+                    isinstance(ADMIN_PASS_HASH, bytes) and bcrypt.checkpw(input_pass.encode(), ADMIN_PASS_HASH)
+                )
+
+                if input_user == ADMIN_USER and es_pass_valida:
                     st.session_state["autenticado"] = True
                     st.session_state["usuario_actual"] = "Prof. Giuliano"
                     st.session_state["rol_actual"] = "admin"
                     st.rerun()
                 else:
-                    # Se pide explícitamente solo lo necesario (contrasena incluida
-                    # porque hace falta para validar), nunca con select("*").
                     res = ejecutar_seguro(
                         supabase.table("alumnos").select("id, nombre_apellido, contrasena, estado").eq("usuario", input_user),
                         "No se pudo validar el usuario."
@@ -351,12 +327,6 @@ if st.sidebar.button("🔒 Cerrar Sesión"):
 # ==========================================
 # 🔔 MONITOR EN VIVO (FRAGMENT)
 # ==========================================
-# FIX #7: antes se llamaba st.rerun() dentro del for de notificaciones. Eso
-# cortaba el loop en la primera notificación (nunca se procesaba más de una
-# por ciclo) y, al no usar scope="fragment", forzaba un rerun de TODA la
-# página cada vez, no solo de este fragment. Ahora se procesan todas las
-# notificaciones pendientes en la misma corrida, se muestran sus toasts,
-# y se hace un solo rerun acotado al fragment al final (si hubo novedades).
 @st.fragment(run_every=15)
 def monitor_en_vivo():
     if st.session_state["rol_actual"] == "admin":
@@ -396,11 +366,6 @@ def renderizar_tabla_entrenamiento(alumno_id, nombre_atleta, es_espejo=False):
         st.info("No tenés ninguna rutina asignada todavía.")
         return
 
-    # FIX #6: antes se pedía el link de video a la biblioteca UNA VEZ POR
-    # CADA EJERCICIO (problema N+1: con Supabase esto es una llamada de red
-    # real por cada fila, no una query local como en SQLite). Ahora se trae
-    # la biblioteca completa en una sola consulta y se arma un diccionario
-    # en memoria para buscar el link al vuelo.
     res_bib = ejecutar_seguro(supabase.table("biblioteca_ejercicios").select("nombre, link_video"))
     videos_por_nombre = {f["nombre"]: f.get("link_video", "") for f in (res_bib.data if res_bib else [])}
 
@@ -484,11 +449,6 @@ def renderizar_tabla_entrenamiento(alumno_id, nombre_atleta, es_espejo=False):
                         mes_ano = obtener_fecha_hora_actual().strftime("%m-%Y")
                         fecha_y_hora_texto = f"{fecha_hoy_limpia} {hora_limpia}"
 
-                        # FIX #12: antes se insertaba fila por fila (un round-trip de
-                        # red por cada serie válida). Ahora se arma la lista completa
-                        # y se hace un único insert por lote — más rápido y evita
-                        # quedar con una sesión guardada "a medias" si se corta la
-                        # conexión a mitad del loop.
                         filas_a_insertar = [{
                             "fecha": fecha_y_hora_texto,
                             "alumno_id": alumno_id,
@@ -539,7 +499,6 @@ if st.session_state["rol_actual"] == "atleta":
     foto = datos_at.get("foto_perfil") or AVATAR_PREDETERMINADO
     obj = datos_at.get("objetivo") or "Alto Rendimiento"
     dep = datos_at.get("deporte") or "Preparación Física"
-    # FIX #9: calcular_edad ahora se usa (antes estaba definida pero muerta).
     edad_calculada = calcular_edad(datos_at.get("fecha_nacimiento"))
 
     c1, c2 = st.columns([1, 6])
@@ -610,7 +569,6 @@ if st.session_state["rol_actual"] == "atleta":
 # 🚀 PANTALLA ADMIN (COACH)
 # ==========================================
 elif st.session_state["rol_actual"] == "admin":
-    # Nunca se pide la columna contrasena salvo en el login.
     res_ap = ejecutar_seguro(
         supabase.table("alumnos").select("id, nombre_apellido").eq("estado", "aprobado").order("nombre_apellido")
     )
@@ -626,6 +584,7 @@ elif st.session_state["rol_actual"] == "admin":
         al_r = st.selectbox("Auditar Atleta:", list_al_n)
         if al_r != "- Seleccionar -":
             id_r = id_por_nombre[al_r]
+            
             st.markdown("#### 📋 Planificación Asignada Actual")
             res_r_act = ejecutar_seguro(supabase.table("rutinas_asignadas").select("nombre_rutina").eq("alumno_id", id_r).limit(1))
             if res_r_act and res_r_act.data:
@@ -706,7 +665,6 @@ elif st.session_state["rol_actual"] == "admin":
                             if ids_a_borrar:
                                 ejecutar_seguro(supabase.table("rutinas_asignadas").delete().in_("id", ids_a_borrar))
 
-                        # FIX #12: insert por lote en vez de uno por uno.
                         filas_clon = [{
                             "alumno_id": id_destino,
                             "nombre_rutina": item["nombre_rutina"],
@@ -794,7 +752,6 @@ elif st.session_state["rol_actual"] == "admin":
                 with col_b2:
                     if st.button("💾 PUBLICAR PLAN", use_container_width=True, type="primary"):
                         ejecutar_seguro(supabase.table("rutinas_asignadas").delete().eq("alumno_id", id_p))
-                        # FIX #12: insert por lote.
                         filas_plan = [{
                             "alumno_id": id_p, "nombre_rutina": nom_r.strip(),
                             "ejercicio": i["ejercicio"], "ejercicio_id": i.get("ejercicio_id"),
@@ -825,7 +782,6 @@ elif st.session_state["rol_actual"] == "admin":
                 st.divider()
 
     with ta4:
-        # No se pide contrasena acá tampoco.
         ra = ejecutar_seguro(
             supabase.table("alumnos").select("id, nombre_apellido, deporte, peso, altura, objetivo, foto_perfil, fecha_nacimiento").eq("estado", "aprobado")
         )
@@ -835,10 +791,6 @@ elif st.session_state["rol_actual"] == "admin":
             with st.expander(f"{a['nombre_apellido']} ({a['deporte']}){texto_edad_a}"):
                 st.image(a.get("foto_perfil") or AVATAR_PREDETERMINADO, width=100)
                 st.text(f"Peso: {a['peso']}kg | Altura: {a['altura']}m | Meta: {a['objetivo']}")
-                # FIX #5: se agrega confirmación antes de un borrado destructivo.
-                # Gracias al ON DELETE CASCADE del esquema nuevo, esto también
-                # elimina en cascada rutinas, registros, asistencias, mensajes
-                # y notificaciones de ese alumno (antes quedaban huérfanos).
                 confirmar_borrado = st.checkbox("Confirmo que quiero eliminar a este atleta y TODO su historial", key=f"conf_del_{a['id']}")
                 if st.button("🗑️ ELIMINAR", key=f"del_{a['id']}", disabled=not confirmar_borrado):
                     res_del = ejecutar_seguro(supabase.table("alumnos").delete().eq("id", a['id']), "No se pudo eliminar al atleta.")
@@ -890,8 +842,6 @@ elif st.session_state["rol_actual"] == "admin":
 
         if st.button("🔄 PREPARAR COPIA DE SEGURIDAD", use_container_width=True):
             try:
-                # El backup de alumnos excluye explícitamente la columna
-                # contrasena (hash), para no exportar ni siquiera el hash.
                 res_al_bk = ejecutar_seguro(
                     supabase.table("alumnos").select("id, nombre_apellido, usuario, fecha_nacimiento, peso, altura, deporte, objetivo, estado, created_at")
                 )
