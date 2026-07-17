@@ -824,7 +824,7 @@ elif st.session_state["rol_actual"] == "admin":
                             time.sleep(1)
                             st.rerun()
 
-   with ta6:
+    with ta6:
         st.markdown("### Biblioteca de Ejercicios")
         if st.button("Vaciar Biblioteca"):
             res_vac = ejecutar_seguro(supabase.table("biblioteca_ejercicios").delete().neq("id", 0))
