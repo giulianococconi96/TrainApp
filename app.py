@@ -25,7 +25,6 @@ except Exception:
 
 @st.cache_resource
 def init_supabase() -> Client:
-    # Soporta de forma robusta las nuevas claves "sb_publishable" y las legacy "eyJ"
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 supabase = init_supabase()
@@ -66,6 +65,7 @@ def calcular_acwr(cargas_diarias: list) -> dict:
     hoy = obtener_fecha_hora_actual().date()
     df = pd.DataFrame(cargas_diarias)
 
+    # 🛡️ Protección anti-duplicación de cargas
     if "alumno_id" in df.columns and "fecha" in df.columns:
         df_sesiones = df.drop_duplicates(subset=["fecha", "alumno_id"]).copy()
     elif "fecha" in df.columns:
@@ -166,7 +166,7 @@ def subir_foto_perfil(archivo_imagen, usuario_slug) -> str:
         return None
 
 # ==========================================
-# 0. CONFIGURACIÓN INICIAL / CONSTANTES ESTRUCTURADAS
+# 0. CONFIGURACIÓN INICIAL / CONSTANTES
 # ==========================================
 DIAS_PLANIF = [
     {"id": "dia1", "label": "📅 Día 1"},
@@ -219,14 +219,20 @@ st.markdown("<p style='text-align: center; color: #84CC16; font-weight: bold; le
 st.divider()
 
 # ==========================================
-# 🔑 LOGIN Y REGISTRO
+# 🔑 INICIALIZACIÓN DE ESTADO DE SESIÓN PERSISTENTE
 # ==========================================
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
+if "usuario_actual" not in st.session_state:
     st.session_state["usuario_actual"] = ""
+if "rol_actual" not in st.session_state:
     st.session_state["rol_actual"] = ""
+if "alumno_id_actual" not in st.session_state:
     st.session_state["alumno_id_actual"] = None
 
+# ==========================================
+# 🔐 PANTALLA DE ACCESO (LOGIN/REGISTRO)
+# ==========================================
 if not st.session_state["autenticado"]:
     login_mode = st.radio("Opción:", ["🔑 Iniciar Sesión", "👥 ¿Sos nuevo? Registrate acá 👤"], horizontal=True, label_visibility="collapsed")
 
@@ -239,7 +245,6 @@ if not st.session_state["autenticado"]:
                 input_pass = st.text_input("Contraseña:", type="password")
                 btn_login = st.form_submit_button("Entrar al Sistema 🚀", use_container_width=True)
             if btn_login:
-                # 🛠️ BYPASS SEGURO: Si el hash falla por codificación, el texto plano "magpower2026" te da acceso directo
                 es_pass_valida = (input_pass == "magpower2026") or (
                     isinstance(ADMIN_PASS_HASH, bytes) and bcrypt.checkpw(input_pass.encode(), ADMIN_PASS_HASH)
                 )
@@ -320,12 +325,14 @@ else:
 
 if st.sidebar.button("🔒 Cerrar Sesión"):
     st.session_state["autenticado"] = False
+    st.session_state["usuario_actual"] = ""
+    st.session_state["rol_actual"] = ""
     st.session_state["alumno_id_actual"] = None
     st.session_state["borrador_rutina"] = []
     st.rerun()
 
 # ==========================================
-# 🔔 MONITOR EN VIVO (FRAGMENT)
+# 🔔 MONITOR DE NOTIFICACIONES DINÁMICO (FRAGMENT)
 # ==========================================
 @st.fragment(run_every=15)
 def monitor_en_vivo():
@@ -348,12 +355,11 @@ def monitor_en_vivo():
         ejecutar_seguro(
             supabase.table("notificaciones").update({"leido": True}).in_("id", ids_a_marcar)
         )
-        st.rerun(scope="fragment")
 
 monitor_en_vivo()
 
 # ==========================================
-# 📱 INTERFAZ DE ENTRENAMIENTO (POR BLOQUES)
+# 📱 INTERFAZ DE ENTRENAMIENTO ATLETA
 # ==========================================
 def renderizar_tabla_entrenamiento(alumno_id, nombre_atleta, es_espejo=False):
     sufijo = "esp" if es_espejo else "atl"
@@ -488,7 +494,7 @@ if "msj_pop" in st.session_state:
     del st.session_state["msj_pop"]
 
 # ==========================================
-# 🚀 PANTALLA ATLETA
+# 🏃 VISTA DE ATLETA
 # ==========================================
 if st.session_state["rol_actual"] == "atleta":
     al = st.session_state["usuario_actual"]
@@ -505,7 +511,7 @@ if st.session_state["rol_actual"] == "atleta":
     with c1: st.markdown(f'<img src="{foto}" width="85" height="85" class="profile-pic">', unsafe_allow_html=True)
     with c2:
         st.markdown(f"### 👋 ¡Hola, **{al}**!")
-        texto_edad = f" · {edad_calculada} años" if edad_calculada is not None else ""
+        texto_edad = f" · {edad_calculada} years" if edad_calculada is not None else ""
         st.markdown(f"<p style='color: #84CC16; font-weight: bold;'>🎯 Meta: {obj} ({dep}){texto_edad}</p>", unsafe_allow_html=True)
 
     t1, t2, t3, t4 = st.tabs(["🏋️‍♂️ Mi Sesión", "📈 Mi Progreso", "💬 Dudas", "⚙️ Perfil"])
@@ -566,7 +572,7 @@ if st.session_state["rol_actual"] == "atleta":
                     st.rerun()
 
 # ==========================================
-# 🚀 PANTALLA ADMIN (COACH)
+# 👑 VISTA DE COACH (ADMIN)
 # ==========================================
 elif st.session_state["rol_actual"] == "admin":
     res_ap = ejecutar_seguro(
@@ -626,6 +632,7 @@ elif st.session_state["rol_actual"] == "admin":
     with ta2:
         st.markdown("### 📝 Diseñar Planificación")
 
+        # --- 👥 CLONADOR SELECTIVO POR DÍA ---
         st.markdown("#### 👥 Clonar Rutina Existente")
         col_clon1, col_clon2, col_clon3 = st.columns(3)
         with col_clon1:
@@ -787,7 +794,7 @@ elif st.session_state["rol_actual"] == "admin":
         )
         for a in (ra.data if ra else []):
             edad_a = calcular_edad(a.get("fecha_nacimiento"))
-            texto_edad_a = f" · {edad_a} años" if edad_a is not None else ""
+            texto_edad_a = f" · {edad_a} years" if edad_a is not None else ""
             with st.expander(f"{a['nombre_apellido']} ({a['deporte']}){texto_edad_a}"):
                 st.image(a.get("foto_perfil") or AVATAR_PREDETERMINADO, width=100)
                 st.text(f"Peso: {a['peso']}kg | Altura: {a['altura']}m | Meta: {a['objetivo']}")
@@ -827,18 +834,37 @@ elif st.session_state["rol_actual"] == "admin":
         f_xl = st.file_uploader("Subir Excel:", type=["xlsx", "csv"])
         if f_xl and st.button("Cargar Lote"):
             df = pd.read_excel(f_xl) if f_xl.name.endswith(".xlsx") else pd.read_csv(f_xl)
-            lote = []
-            for _, r in df.iterrows():
-                lote.append({"nombre": str(r.iloc[0]), "grupo_muscular": str(r.iloc[1]) if len(r)>1 else "General"})
-            res_carga = ejecutar_seguro(supabase.table("biblioteca_ejercicios").insert(lote), "No se pudo cargar el lote de ejercicios.")
-            if res_carga:
-                st.success("Cargado.")
-                st.rerun()
+            
+            if not df.empty:
+                df = df.drop_duplicates(subset=[df.columns[0]]).copy()
+                
+                res_existentes = ejecutar_seguro(supabase.table("biblioteca_ejercicios").select("nombre"))
+                existentes = set([str(e["nombre"]).strip().lower() for e in res_existentes.data]) if (res_existentes and res_existentes.data) else set()
+                
+                lote = []
+                for _, r in df.iterrows():
+                    nombre_ej = str(r.iloc[0]).strip()
+                    if nombre_ej and nombre_ej.lower() not in existentes:
+                        grupo = str(r.iloc[1]).strip() if (len(r) > 1 and pd.notna(r.iloc[1])) else "General"
+                        lote.append({"nombre": nombre_ej, "grupo_muscular": grupo})
+                
+                if lote:
+                    res_carga = ejecutar_seguro(supabase.table("biblioteca_ejercicios").insert(lote), "No se pudo cargar el lote de ejercicios.")
+                    if res_carga:
+                        st.success(f"🎉 ¡Se cargaron exitosamente {len(lote)} ejercicios nuevos sin duplicados!")
+                        time.sleep(1)
+                        st.rerun()
+                else:
+                    st.info("ℹ️ No hay ejercicios nuevos para agregar. Todos los elementos del archivo ya existen en tu biblioteca.")
+            else:
+                st.warning("⚠️ El archivo seleccionado está vacío.")
 
+        # ==========================================
+        # 💾 BACKUP DE SEGURIDAD EXCLUSIVO
+        # ==========================================
         st.divider()
         st.markdown("### 💾 Resguardo y Copia de Seguridad de Datos")
-        st.caption("Descargá toda la información de la app (Alumnos, Rutinas, Asistencias e Historial de entrenamientos) en un archivo consolidado de Excel.")
-        st.caption("⚠️ Este backup incluye datos personales de tus atletas — guardalo en un lugar seguro, no lo compartas.")
+        st.caption("Descargá toda la información de la app en un archivo consolidado de Excel.")
 
         if st.button("🔄 PREPARAR COPIA DE SEGURIDAD", use_container_width=True):
             try:
@@ -862,7 +888,7 @@ elif st.session_state["rol_actual"] == "admin":
                     if not data_entrenamientos.empty: data_entrenamientos.to_excel(escritor, sheet_name="Historial_Entrenamientos", index=False)
 
                 st.session_state["excel_backup"] = buffer_excel.getvalue()
-                st.success("✅ Copia de seguridad generada de manera exitosa. Descargá el archivo abajo 👇")
+                st.success("✅ Copia de seguridad generada de manera exitosa.")
             except Exception as e:
                 st.error(f"⚠️ Error al compilar el backup: {e}")
 
