@@ -136,7 +136,7 @@ def obtener_frase_motivacional(dias_acumulados):
     frases = [
         "¡Excelente primer paso! El camino a la alta competencia empieza hoy. 🚀",
         "¡Buen comienzo! La constancia es el secreto del rendimiento. 💪",
-        f"¡Suma y sigue! Ya van {dias_acumulados} entrenamientos este mes. ¡Buen ritmo! <b></b>",
+        f"¡Suma y sigue! Ya van {dias_acumulados} entrenamientos este mes. ¡Buen ritmo! ⚡",
         f"¡Cuerpo e intención enfocados! Llevás {dias_acumulados} sesiones. No aflojes. 🔥",
         f"¡Tremenda disciplina! {dias_acumulados} días dándolo todo. Te estás volviendo imparable. 👑",
         f"El esfuerzo de hoy es el rendimiento del mañana. ¡{dias_acumulados} sesiones acumuladas! 🏆",
@@ -182,7 +182,7 @@ def label_dia(dia_id):
     return next((d["label"] for d in DIAS_PLANIF if d["id"] == dia_id), dia_id)
 
 def label_bloque(bloque_id):
-    return next((b["label"] for b in SUB_BLOQUES if b["id"] == bloque_id), gateway = bloque_id)
+    return next((b["label"] for b in SUB_BLOQUES if b["id"] == bloque_id), bloque_id)
 
 def armar_clave_bloque(dia_id, bloque_id):
     return f"{dia_id}|{bloque_id}"
@@ -192,7 +192,7 @@ def desarmar_clave_bloque(clave):
     return (partes[0], partes[1]) if len(partes) == 2 else (clave, "")
 
 # ==========================================
-# 🛡️ INTERFAZ DE FUNCIONES GLOBALES RE-UTILIZABLES
+# 🛡️ INTERFAZ DE FUNCIONES GLOBALES
 # ==========================================
 def renderizar_tabla_entrenamiento(alumno_id, nombre_atleta, es_espejo=False):
     sufijo = "esp" if es_espejo else "atl"
@@ -254,7 +254,7 @@ def renderizar_tabla_entrenamiento(alumno_id, nombre_atleta, es_espejo=False):
                     for s in range(1, series_obj + 1):
                         clave_actual = (bloque["id"], nombre_ej, s, idx)
                         if clave_actual in entradas_alumno:
-                            entradas_alumno[clave_actual]["notes"] = notas
+                            entradas_alumno[clave_actual]["notas"] = notas
                     st.divider()
 
     if visibles:
@@ -874,7 +874,7 @@ if st.session_state["autenticado"]:
                         nombre_ej = str(r.iloc[0]).strip()
                         if nombre_ej and nombre_ej.lower() not in existentes_normalizados:
                             grupo = str(r.iloc[1]).strip() if (len(r) > 1 and pd.notna(r.iloc[1])) else "General"
-                            lote.append({"nombre": nombre_ej, "grupo_muscular": grupo})
+                            lote.append({"nombre": nombre_ej, "grupo_muscular": group})
 
                     if lote:
                         res_carga = ejecutar_seguro(supabase.table("biblioteca_ejercicios").insert(lote), "No se pudo cargar el lote de ejercicios.")
