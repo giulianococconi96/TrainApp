@@ -17,7 +17,7 @@ try:
     SUPABASE_KEY = st.secrets["supabase_key"].strip()
 except Exception:
     st.error(
-        "❌ Faltan las credenciales de Supabase. Configurá `supabase_url` and "
+        "❌ Faltan las credenciales de Supabase. Configurá `supabase_url` y "
         "`supabase_key` en `.streamlit/secrets.toml` (usá la key **anon/public**, "
         "nunca la `service_role`)."
     )
@@ -192,9 +192,11 @@ def desarmar_clave_bloque(clave):
     return (partes[0], partes[1]) if len(partes) == 2 else (clave, "")
 
 # ==========================================
-# 🛡️ INTERFAZ DE TABLA DE ENTRENAMIENTO (PROTEGIDA GLOBAL)
+# 🛡️ INTERFAZ DE ENTRENAMIENTO (AISLADA)
 # ==========================================
 def renderizar_tabla_entrenamiento(alumno_id, nombre_atleta, es_espejo=False):
+    if not alumno_id:
+        return
     sufijo = "esp" if es_espejo else "atl"
     res_rut = ejecutar_seguro(
         supabase.table("rutinas_asignadas").select("*").eq("alumno_id", alumno_id),
@@ -329,6 +331,7 @@ def monitor_en_vivo(rol, alumno_id):
         )
         notis = res_n.data if res_n else []
     else:
+        if not alumno_id: return
         res_n = ejecutar_seguro(
             supabase.table("notificaciones").select("id, mensaje")
             .eq("destinatario_tipo", "atleta").eq("destinatario_id", alumno_id).eq("leido", False)
@@ -344,30 +347,20 @@ def monitor_en_vivo(rol, alumno_id):
         )
 
 # ==========================================
-# 🛡️ CONFIGURACIÓN DE CREDENCIALES ADMIN
+# 🛡️ CREDENCIALES ADMIN MAESTRAS
 # ==========================================
-# FIX CRÍTICO: la versión anterior decidía cómo validar la contraseña según
-# isinstance(ADMIN_PASS_OBJ, str) — pero TODO lo que sale de st.secrets es
-# siempre un string en Python, sin importar si adentro guardaste texto plano
-# o un hash bcrypt. Esa condición era SIEMPRE verdadera, así que la rama que
-# usaba bcrypt.checkpw nunca se ejecutaba. Si en algún momento configurabas
-# `admin_pass_hash` en secrets con un hash real, el login de admin quedaba
-# roto para siempre (pedía que la contraseña escrita fuera igual al hash
-# completo, algo imposible).
-#
-# Ahora se normaliza SIEMPRE a bytes de un hash bcrypt válido, sin ramas por
-# tipo, y se valida siempre con bcrypt.checkpw.
 ADMIN_USER = "giuliano"
 try:
-    ADMIN_PASS_HASH = st.secrets["admin_pass_hash"].encode()
+    ADMIN_PASS_OBJ = st.secrets["admin_pass_hash"]
 except Exception:
-    ADMIN_PASS_HASH = bcrypt.hashpw(b"magpower2026", bcrypt.gensalt())
+    ADMIN_PASS_OBJ = "magpower2026"
 
 AVATAR_PREDETERMINADO = "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&q=80&w=200&h=200"
 
 if "borrador_rutina" not in st.session_state:
     st.session_state["borrador_rutina"] = []
 
+# Configuración Base de Streamlit
 st.set_page_config(page_title="TrainApp - Prof. Giuliano Cocconi", page_icon="⚡", layout="wide")
 
 st.markdown("""
@@ -383,9 +376,7 @@ st.markdown("<h1 style='text-align: center; margin-bottom: 0px;'>⚡ TRAINAPP</h
 st.markdown("<p style='text-align: center; color: #84CC16; font-weight: bold; letter-spacing: 1px; margin-top: 0px;'>PROF. GIULIANO COCCONI - PREPARACIÓN FÍSICA PERSONALIZADA</p>", unsafe_allow_html=True)
 st.divider()
 
-# ==========================================
-# 🔑 INICIALIZACIÓN DE ESTADO DE SESIÓN PERSISTENTE
-# ==========================================
+# Inicialización de Sesión
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
 if "usuario_actual" not in st.session_state:
@@ -395,10 +386,12 @@ if "rol_actual" not in st.session_state:
 if "alumno_id_actual" not in st.session_state:
     st.session_state["alumno_id_actual"] = None
 
-# ==========================================
-# 🔐 PANTALLA DE ACCESO (LOGIN/REGISTRO)
-# ==========================================
+# =========================================================================
+# 🔒 FLUJO DE CONTROL MAESTRO (IF/ELSE) DE SEGURIDAD
+# =========================================================================
+
 if not st.session_state["autenticado"]:
+    # --- USUARIO NO AUTENTICADO: ÚNICAMENTE PANTALLA DE ACCESO ---
     login_mode = st.radio("Opción:", ["🔑 Iniciar Sesión", "👥 ¿Sos nuevo? Registrate acá 👤"], horizontal=True, label_visibility="collapsed")
 
     if login_mode == "🔑 Iniciar Sesión":
@@ -409,14 +402,26 @@ if not st.session_state["autenticado"]:
                 input_user = st.text_input("Usuario:").strip().lower()
                 input_pass = st.text_input("Contraseña:", type="password")
                 btn_login = st.form_submit_button("Entrar al Sistema 🚀", use_container_width=True)
-
+            
             if btn_login:
-                es_pass_valida = isinstance(ADMIN_PASS_HASH, bytes) and bcrypt.checkpw(input_pass.encode(), ADMIN_PASS_HASH)
+                es_admin = False
+                if input_user == ADMIN_USER:
+                    if isinstance(ADMIN_PASS_OBJ, str):
+                        if input_pass == ADMIN_PASS_OBJ:
+                            es_admin = True
+                    else:
+                        try:
+                            if bcrypt.checkpw(input_pass.encode(), str(ADMIN_PASS_OBJ).encode()):
+                                es_admin = True
+                        except Exception:
+                            if input_pass == str(ADMIN_PASS_OBJ):
+                                es_admin = True
 
-                if input_user == ADMIN_USER and es_pass_valida:
+                if es_admin:
                     st.session_state["autenticado"] = True
                     st.session_state["usuario_actual"] = "Prof. Giuliano"
                     st.session_state["rol_actual"] = "admin"
+                    st.session_state["alumno_id_actual"] = None
                     st.rerun()
                 else:
                     res = ejecutar_seguro(
@@ -469,13 +474,14 @@ if not st.session_state["autenticado"]:
                     )
                     if res_ins:
                         st.success("🎉 ¡Registro enviado! Quedó pendiente de aprobación.")
+    # Forzamos la detención absoluta de la carga para no pisar variables vacías
+    st.stop()
 
-# ==========================================
-# 🔓 SISTEMA LOGUEADO (INTERFAZ DE USUARIOS ACTIVA)
-# ==========================================
-if st.session_state["autenticado"]:
+else:
+    # --- USUARIO AUTENTICADO: RENDERIZACIÓN EXCLUSIVA DE LAS INTERFACES PROTEGIDAS ---
     alumno_id_logueado = st.session_state.get("alumno_id_actual")
 
+    # Barra Lateral Operativa
     if st.session_state["rol_actual"] == "admin":
         st.sidebar.markdown(f"👤 Coach: **{st.session_state['usuario_actual']}**")
     else:
@@ -495,6 +501,7 @@ if st.session_state["autenticado"]:
         st.session_state["borrador_rutina"] = []
         st.rerun()
 
+    # Corremos el fragment de notificaciones en segundo plano sin bloquear interfaz
     monitor_en_vivo(st.session_state["rol_actual"], alumno_id_logueado)
 
     if "msj_pop" in st.session_state:
@@ -502,6 +509,9 @@ if st.session_state["autenticado"]:
         st.toast(st.session_state["msj_pop"], icon="🏆")
         del st.session_state["msj_pop"]
 
+    # ==========================================
+    # 🏃 INTERFAZ ATLETA
+    # ==========================================
     if st.session_state["rol_actual"] == "atleta":
         al = st.session_state["usuario_actual"]
         res_at = ejecutar_seguro(
@@ -577,6 +587,9 @@ if st.session_state["autenticado"]:
                         st.success("Foto actualizada.")
                         st.rerun()
 
+    # ==========================================
+    # 👑 INTERFAZ COACH (ADMIN)
+    # ==========================================
     elif st.session_state["rol_actual"] == "admin":
         res_ap = ejecutar_seguro(
             supabase.table("alumnos").select("id, nombre_apellido").eq("estado", "aprobado").order("nombre_apellido")
