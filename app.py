@@ -192,7 +192,7 @@ def desarmar_clave_bloque(clave):
     return (partes[0], partes[1]) if len(partes) == 2 else (clave, "")
 
 # ==========================================
-# 🛡️ INTERFAZ DE FUNCIONES GLOBALES
+# 🛡️ INTERFAZ DE TABLA DE ENTRENAMIENTO (PROTEGIDA GLOBAL)
 # ==========================================
 def renderizar_tabla_entrenamiento(alumno_id, nombre_atleta, es_espejo=False):
     sufijo = "esp" if es_espejo else "atl"
@@ -874,7 +874,7 @@ if st.session_state["autenticado"]:
                         nombre_ej = str(r.iloc[0]).strip()
                         if nombre_ej and nombre_ej.lower() not in existentes_normalizados:
                             grupo = str(r.iloc[1]).strip() if (len(r) > 1 and pd.notna(r.iloc[1])) else "General"
-                            lote.append({"nombre": nombre_ej, "grupo_muscular": group})
+                            lote.append({"nombre": nombre_ej, "grupo_muscular": grupo})
 
                     if lote:
                         res_carga = ejecutar_seguro(supabase.table("biblioteca_ejercicios").insert(lote), "No se pudo cargar el lote de ejercicios.")
@@ -883,7 +883,7 @@ if st.session_state["autenticado"]:
                             time.sleep(1)
                             st.rerun()
                     else:
-                        st.info("ℹ️ No hay ejercicios nuevos para agregar. Todos los elementos del archivo ya existen en tu biblioteca.")
+                        st.info("ℹ️ No hay ejercicios nuevos para agregar. Todos los elements del archivo ya existen en tu biblioteca.")
                 else:
                     st.warning("⚠️ El archivo seleccionado está vacío.")
 
