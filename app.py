@@ -17,7 +17,7 @@ try:
     SUPABASE_KEY = st.secrets["supabase_key"].strip()
 except Exception:
     st.error(
-        "❌ Faltan las credenciales de Supabase. Configurá `supabase_url` y "
+        "❌ Faltan las credenciales de Supabase. Configurá `supabase_url` and "
         "`supabase_key` en `.streamlit/secrets.toml` (usá la key **anon/public**, "
         "nunca la `service_role`)."
     )
@@ -65,7 +65,7 @@ def calcular_acwr(cargas_diarias: list) -> dict:
     hoy = obtener_fecha_hora_actual().date()
     df = pd.DataFrame(cargas_diarias)
 
-    # 🛡️ Protección anti-duplicación de cargas
+    # 🛡️ Protección anti-duplicación de cargas por series
     if "alumno_id" in df.columns and "fecha" in df.columns:
         df_sesiones = df.drop_duplicates(subset=["fecha", "alumno_id"]).copy()
     elif "fecha" in df.columns:
@@ -511,7 +511,7 @@ if st.session_state["rol_actual"] == "atleta":
     with c1: st.markdown(f'<img src="{foto}" width="85" height="85" class="profile-pic">', unsafe_allow_html=True)
     with c2:
         st.markdown(f"### 👋 ¡Hola, **{al}**!")
-        texto_edad = f" · {edad_calculada} years" if edad_calculada is not None else ""
+        texto_edad = f" · {edad_calculada} años" if edad_calculada is not None else ""
         st.markdown(f"<p style='color: #84CC16; font-weight: bold;'>🎯 Meta: {obj} ({dep}){texto_edad}</p>", unsafe_allow_html=True)
 
     t1, t2, t3, t4 = st.tabs(["🏋️‍♂️ Mi Sesión", "📈 Mi Progreso", "💬 Dudas", "⚙️ Perfil"])
@@ -794,7 +794,7 @@ elif st.session_state["rol_actual"] == "admin":
         )
         for a in (ra.data if ra else []):
             edad_a = calcular_edad(a.get("fecha_nacimiento"))
-            texto_edad_a = f" · {edad_a} years" if edad_a is not None else ""
+            texto_edad_a = f" · {edad_a} años" if edad_a is not None else ""
             with st.expander(f"{a['nombre_apellido']} ({a['deporte']}){texto_edad_a}"):
                 st.image(a.get("foto_perfil") or AVATAR_PREDETERMINADO, width=100)
                 st.text(f"Peso: {a['peso']}kg | Altura: {a['altura']}m | Meta: {a['objetivo']}")
