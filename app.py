@@ -346,12 +346,22 @@ def monitor_en_vivo(rol, alumno_id):
 # ==========================================
 # 🛡️ CONFIGURACIÓN DE CREDENCIALES ADMIN
 # ==========================================
+# FIX CRÍTICO: la versión anterior decidía cómo validar la contraseña según
+# isinstance(ADMIN_PASS_OBJ, str) — pero TODO lo que sale de st.secrets es
+# siempre un string en Python, sin importar si adentro guardaste texto plano
+# o un hash bcrypt. Esa condición era SIEMPRE verdadera, así que la rama que
+# usaba bcrypt.checkpw nunca se ejecutaba. Si en algún momento configurabas
+# `admin_pass_hash` en secrets con un hash real, el login de admin quedaba
+# roto para siempre (pedía que la contraseña escrita fuera igual al hash
+# completo, algo imposible).
+#
+# Ahora se normaliza SIEMPRE a bytes de un hash bcrypt válido, sin ramas por
+# tipo, y se valida siempre con bcrypt.checkpw.
 ADMIN_USER = "giuliano"
-
 try:
-    ADMIN_PASS_OBJ = st.secrets["admin_pass_hash"]
+    ADMIN_PASS_HASH = st.secrets["admin_pass_hash"].encode()
 except Exception:
-    ADMIN_PASS_OBJ = "magpower2026"
+    ADMIN_PASS_HASH = bcrypt.hashpw(b"magpower2026", bcrypt.gensalt())
 
 AVATAR_PREDETERMINADO = "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&q=80&w=200&h=200"
 
@@ -399,22 +409,11 @@ if not st.session_state["autenticado"]:
                 input_user = st.text_input("Usuario:").strip().lower()
                 input_pass = st.text_input("Contraseña:", type="password")
                 btn_login = st.form_submit_button("Entrar al Sistema 🚀", use_container_width=True)
-            
-            if btn_login:
-                es_admin = False
-                if input_user == ADMIN_USER:
-                    if isinstance(ADMIN_PASS_OBJ, str):
-                        if input_pass == ADMIN_PASS_OBJ:
-                            es_admin = True
-                    else:
-                        try:
-                            if bcrypt.checkpw(input_pass.encode(), str(ADMIN_PASS_OBJ).encode()):
-                                es_admin = True
-                        except Exception:
-                            if input_pass == str(ADMIN_PASS_OBJ):
-                                es_admin = True
 
-                if es_admin:
+            if btn_login:
+                es_pass_valida = isinstance(ADMIN_PASS_HASH, bytes) and bcrypt.checkpw(input_pass.encode(), ADMIN_PASS_HASH)
+
+                if input_user == ADMIN_USER and es_pass_valida:
                     st.session_state["autenticado"] = True
                     st.session_state["usuario_actual"] = "Prof. Giuliano"
                     st.session_state["rol_actual"] = "admin"
@@ -477,7 +476,6 @@ if not st.session_state["autenticado"]:
 if st.session_state["autenticado"]:
     alumno_id_logueado = st.session_state.get("alumno_id_actual")
 
-    # BARRA LATERAL
     if st.session_state["rol_actual"] == "admin":
         st.sidebar.markdown(f"👤 Coach: **{st.session_state['usuario_actual']}**")
     else:
@@ -497,7 +495,6 @@ if st.session_state["autenticado"]:
         st.session_state["borrador_rutina"] = []
         st.rerun()
 
-    # EJECUCIÓN DEL FRAGMENT DE NOTIFICACIONES
     monitor_en_vivo(st.session_state["rol_actual"], alumno_id_logueado)
 
     if "msj_pop" in st.session_state:
@@ -505,9 +502,6 @@ if st.session_state["autenticado"]:
         st.toast(st.session_state["msj_pop"], icon="🏆")
         del st.session_state["msj_pop"]
 
-    # ==========================================
-    # 🏃 INTERFAZ ATLETA
-    # ==========================================
     if st.session_state["rol_actual"] == "atleta":
         al = st.session_state["usuario_actual"]
         res_at = ejecutar_seguro(
@@ -583,9 +577,6 @@ if st.session_state["autenticado"]:
                         st.success("Foto actualizada.")
                         st.rerun()
 
-    # ==========================================
-    # 👑 INTERFAZ COACH (ADMIN)
-    # ==========================================
     elif st.session_state["rol_actual"] == "admin":
         res_ap = ejecutar_seguro(
             supabase.table("alumnos").select("id, nombre_apellido").eq("estado", "aprobado").order("nombre_apellido")
@@ -883,7 +874,7 @@ if st.session_state["autenticado"]:
                             time.sleep(1)
                             st.rerun()
                     else:
-                        st.info("ℹ️ No hay ejercicios nuevos para agregar. Todos los elements del archivo ya existen en tu biblioteca.")
+                        st.info("ℹ️ No hay ejercicios nuevos para agregar. Todos los elementos del archivo ya existen en tu biblioteca.")
                 else:
                     st.warning("⚠️ El archivo seleccionado está vacío.")
 
