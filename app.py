@@ -65,7 +65,6 @@ def calcular_acwr(cargas_diarias: list) -> dict:
     hoy = obtener_fecha_hora_actual().date()
     df = pd.DataFrame(cargas_diarias)
 
-    # 🛡️ Protección anti-duplicación de cargas por series
     if "alumno_id" in df.columns and "fecha" in df.columns:
         df_sesiones = df.drop_duplicates(subset=["fecha", "alumno_id"]).copy()
     elif "fecha" in df.columns:
@@ -192,11 +191,17 @@ def desarmar_clave_bloque(clave):
     partes = str(clave).split("|")
     return (partes[0], partes[1]) if len(partes) == 2 else (clave, "")
 
+# ==========================================
+# 🛡️ CONFIGURACIÓN DE CREDENCIALES ADMIN SECRETA
+# ==========================================
 ADMIN_USER = "giuliano"
+USANDO_HASH_FIJO = True
+
 try:
     ADMIN_PASS_HASH = st.secrets["admin_pass_hash"].encode()
 except Exception:
-    ADMIN_PASS_HASH = bcrypt.hashpw(b"magpower2026", bcrypt.gensalt())
+    ADMIN_PASS_HASH = b"magpower2026"
+    USANDO_HASH_FIJO = False
 
 AVATAR_PREDETERMINADO = "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&q=80&w=200&h=200"
 
@@ -245,9 +250,10 @@ if not st.session_state["autenticado"]:
                 input_pass = st.text_input("Contraseña:", type="password")
                 btn_login = st.form_submit_button("Entrar al Sistema 🚀", use_container_width=True)
             if btn_login:
-                es_pass_valida = (input_pass == "magpower2026") or (
-                    isinstance(ADMIN_PASS_HASH, bytes) and bcrypt.checkpw(input_pass.encode(), ADMIN_PASS_HASH)
-                )
+                if USANDO_HASH_FIJO:
+                    es_pass_valida = bcrypt.checkpw(input_pass.encode(), ADMIN_PASS_HASH)
+                else:
+                    es_pass_valida = (input_pass.encode() == ADMIN_PASS_HASH)
 
                 if input_user == ADMIN_USER and es_pass_valida:
                     st.session_state["autenticado"] = True
@@ -576,7 +582,7 @@ if st.session_state["rol_actual"] == "atleta":
 # ==========================================
 elif st.session_state["rol_actual"] == "admin":
     res_ap = ejecutar_seguro(
-        supabase.table("alumnos").select("id, nombre_apellido").eq("estado", "aprobado").order("nombre_apellido")
+        supabase.table("alumnos").select("id, nombre_apellido").eq("estado", "approved").order("nombre_apellido")
     )
     lista_alumnos_datos = res_ap.data if res_ap else []
     id_por_nombre = {a["nombre_apellido"]: a["id"] for a in lista_alumnos_datos}
@@ -590,13 +596,28 @@ elif st.session_state["rol_actual"] == "admin":
         al_r = st.selectbox("Auditar Atleta:", list_al_n)
         if al_r != "- Seleccionar -":
             id_r = id_por_nombre[al_r]
-            
+
             st.markdown("#### 📋 Planificación Asignada Actual")
-            res_r_act = ejecutar_seguro(supabase.table("rutinas_asignadas").select("nombre_rutina").eq("alumno_id", id_r).limit(1))
-            if res_r_act and res_r_act.data:
-                st.success(f"**Rutina Activa:** {res_r_act.data[0]['nombre_rutina']}")
+            res_r_act = ejecutar_seguro(supabase.table("rutinas_asignadas").select("*").eq("alumno_id", id_r))
+            plan_actual = res_r_act.data if res_r_act else []
+
+            if plan_actual:
+                st.success(f"**Rutina Activa:** {plan_actual[0]['nombre_rutina']}")
+
+                for dia in DIAS_PLANIF:
+                    items_dia = [it for it in plan_actual if desarmar_clave_bloque(it["bloque"])[0] == dia["id"]]
+                    if items_dia:
+                        st.markdown(f"**{dia['label']}**")
+                        for bloque in SUB_BLOQUES:
+                            items_bloque = [it for it in items_dia if desarmar_clave_bloque(it["bloque"])[1] == bloque["id"]]
+                            if items_bloque:
+                                st.caption(bloque["label"])
+                                for it in items_bloque:
+                                    st.write(f" └─ {it['ejercicio']} — {it['series_objetivo']} series x {it['reps_objetivo']} reps")
             else:
                 st.info("Este atleta no tiene ninguna planificación asignada todavía.")
+
+            st.divider()
 
             rt = ejecutar_seguro(supabase.table("registros_entrenamiento").select("*").eq("alumno_id", id_r).order("fecha", desc=True))
             if rt and rt.data:
@@ -790,7 +811,7 @@ elif st.session_state["rol_actual"] == "admin":
 
     with ta4:
         ra = ejecutar_seguro(
-            supabase.table("alumnos").select("id, nombre_apellido, deporte, peso, altura, objetivo, foto_perfil, fecha_nacimiento").eq("estado", "aprobado")
+            supabase.table("alumnos").select("id, nombre_apellido, deporte, peso, altura, objetivo, foto_perfil, fecha_nacimiento").eq("estado", "approved")
         )
         for a in (ra.data if ra else []):
             edad_a = calcular_edad(a.get("fecha_nacimiento"))
@@ -818,7 +839,7 @@ elif st.session_state["rol_actual"] == "admin":
                     st.write(f"🏃 **Atleta:** {p['nombre_apellido']} ({p['usuario']})")
                 with col_ap2:
                     if st.button("Aprobar Atleta", key=f"ap_{p['id']}", use_container_width=True):
-                        res_apr = ejecutar_seguro(supabase.table("alumnos").update({"estado":"aprobado"}).eq("id", p['id']))
+                        res_apr = ejecutar_seguro(supabase.table("alumnos").update({"estado":"approved"}).eq("id", p['id']))
                         if res_apr:
                             st.success(f"¡{p['nombre_apellido']} aprobado!")
                             time.sleep(1)
@@ -834,26 +855,22 @@ elif st.session_state["rol_actual"] == "admin":
         f_xl = st.file_uploader("Subir Excel:", type=["xlsx", "csv"])
         if f_xl and st.button("Cargar Lote"):
             df = pd.read_excel(f_xl) if f_xl.name.endswith(".xlsx") else pd.read_csv(f_xl)
-            
+
             if not df.empty:
-                # 🛡️ PASO 1: Limpiamos espacios y eliminamos duplicados dentro del mismo archivo Excel de forma case-insensitive
                 df.iloc[:, 0] = df.iloc[:, 0].astype(str).str.strip()
                 df = df.drop_duplicates(subset=[df.columns[0]], keep="first").copy()
-                
-                # 🛡️ PASO 2: Traemos los existentes y los convertimos TODOS a minúsculas para comparar de forma segura
+
                 res_existentes = ejecutar_seguro(supabase.table("biblioteca_ejercicios").select("nombre"))
                 existentes_db = [e["nombre"] for e in res_existentes.data] if (res_existentes and res_existentes.data) else []
                 existentes_normalizados = set(str(nombre).strip().lower() for nombre in existentes_db)
-                
+
                 lote = []
                 for _, r in df.iterrows():
                     nombre_ej = str(r.iloc[0]).strip()
-                    # Comparamos estrictamente en minúsculas para que "Sentadilla" y "sentadilla" se reconozcan como lo mismo
                     if nombre_ej and nombre_ej.lower() not in existentes_normalizados:
                         grupo = str(r.iloc[1]).strip() if (len(r) > 1 and pd.notna(r.iloc[1])) else "General"
                         lote.append({"nombre": nombre_ej, "grupo_muscular": grupo})
-                
-                # 🛡️ PASO 3: Insertamos solo el neto de ejercicios nuevos
+
                 if lote:
                     res_carga = ejecutar_seguro(supabase.table("biblioteca_ejercicios").insert(lote), "No se pudo cargar el lote de ejercicios.")
                     if res_carga:
@@ -865,9 +882,6 @@ elif st.session_state["rol_actual"] == "admin":
             else:
                 st.warning("⚠️ El archivo seleccionado está vacío.")
 
-        # ==========================================
-        # 💾 BACKUP DE SEGURIDAD EXCLUSIVO
-        # ==========================================
         st.divider()
         st.markdown("### 💾 Resguardo y Copia de Seguridad de Datos")
         st.caption("Descargá toda la información de la app en un archivo consolidado de Excel.")
