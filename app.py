@@ -805,20 +805,82 @@ else:
                     st.divider()
 
         with ta4:
+            st.markdown("### 👥 Gestión y Fichas Técnicas de Atletas")
             ra = ejecutar_seguro(
-                supabase.table("alumnos").select("id, nombre_apellido, deporte, peso, altura, objetivo, foto_perfil, fecha_nacimiento").eq("estado", "aprobado")
+                supabase.table("alumnos").select("id, nombre_apellido, deporte, peso, altura, objetivo, foto_perfil, fecha_nacimiento").eq("estado", "aprobado").order("nombre_apellido")
             )
-            for a in (ra.data if ra else []):
-                edad_a = calcular_edad(a.get("fecha_nacimiento"))
-                texto_edad_a = f" · {edad_a} años" if edad_a is not None else ""
-                with st.expander(f"{a['nombre_apellido']} ({a['deporte']}){texto_edad_a}"):
-                    st.image(a.get("foto_perfil") or AVATAR_PREDETERMINADO, width=100)
-                    st.text(f"Peso: {a['peso']}kg | Altura: {a['altura']}m | Meta: {a['objetivo']}")
-                    confirmar_borrado = st.checkbox("Confirmo que quiero eliminar a este atleta y TODO su historial", key=f"conf_del_{a['id']}")
-                    if st.button("🗑️ ELIMINAR", key=f"del_{a['id']}", disabled=not confirmar_borrado):
-                        res_del = ejecutar_seguro(supabase.table("alumnos").delete().eq("id", a['id']), "No se pudo eliminar al atleta.")
-                        if res_del:
-                            st.rerun()
+            atletas_lista = ra.data if ra else []
+
+            if not atletas_lista:
+                st.info("No hay atletas aprobados en el sistema actualmente.")
+            else:
+                for a in atletas_lista:
+                    edad_a = calcular_edad(a.get("fecha_nacimiento"))
+                    texto_edad_a = f" · {edad_a} años" if edad_a is not None else ""
+                    
+                    # Expansor principal por Atleta
+                    with st.expander(f"👤 {a['nombre_apellido']} ({a['deporte']}){texto_edad_a}"):
+                        
+                        # Layout de perfil: Foto a la izquierda, Datos Fisiológicos a la derecha
+                        col_perfil1, col_perfil2 = st.columns([1, 4])
+                        with col_perfil1:
+                            st.markdown(f'<img src="{a.get("foto_perfil") or AVATAR_PREDETERMINADO}" width="110" height="110" class="profile-pic">', unsafe_allow_html=True)
+                        with col_perfil2:
+                            st.markdown(f"**🎯 Objetivo Principal:** {a['objetivo']}")
+                            st.markdown(f"**⚖️ Peso Actual:** `{a['peso']} kg` | **📏 Altura:** `{a['altura']} m`")
+                            # Cálculo rápido de IMC como dato de color útil para el Profe
+                            if a['altura'] > 0:
+                                imc = round(a['peso'] / (a['altura'] ** 2), 1)
+                                st.markdown(f"**📊 IMC Estimado:** `{imc}`")
+
+                        st.markdown("---")
+                        
+                        # Sub-pestañas internas dentro del atleta para no saturar la pantalla
+                        sub_tab_plan, sub_tab_marcas, sub_tab_gestion = st.tabs(["📋 Plan Activo", "📈 Records (e1RM)", "⚙️ Zona de Peligro"])
+                        
+                        with sub_tab_plan:
+                            res_plan_atleta = ejecutar_seguro(supabase.table("rutinas_asignadas").select("*").eq("alumno_id", a['id']))
+                            plan_atleta = res_plan_atleta.data if res_plan_atleta else []
+                            
+                            if plan_atleta:
+                                st.markdown(f"💪 **Rutina Asignada:** `{plan_atleta[0]['nombre_rutina']}`")
+                                for dia in DIAS_PLANIF:
+                                    items_dia = [it for it in plan_atleta if desarmar_clave_bloque(it["bloque"])[0] == dia["id"]]
+                                    if items_dia:
+                                        with st.container():
+                                            st.markdown(f"**{dia['label']}**")
+                                            for bloque in SUB_BLOQUES:
+                                                items_bloque = [it for it in items_dia if desarmar_clave_bloque(it["bloque"])[1] == bloque["id"]]
+                                                if items_bloque:
+                                                    ejs_texto = ", ".join([f"{it['ejercicio']} ({it['series_objetivo']}x{it['reps_objetivo']})" for it in items_bloque])
+                                                    st.caption(f"  └─ *{bloque['label']}:* {ejs_texto}")
+                            else:
+                                st.info("Este atleta no tiene rutinas asignadas en este momento.")
+
+                        with sub_tab_marcas:
+                            res_marcas = ejecutar_seguro(supabase.table("registros_entrenamiento").select("ejercicio, kilos, reps_reales").eq("alumno_id", a['id']))
+                            marcas_data = res_marcas.data if res_marcas else []
+                            
+                            if marcas_data:
+                                df_marcas = pd.DataFrame(marcas_data)
+                                # Calculamos el e1RM de cada serie registrada
+                                df_marcas["e1rm"] = df_marcas.apply(lambda r: calcular_e1rm(r["kilos"], r["reps_reales"]), axis=1)
+                                # Agrupamos por ejercicio para obtener el récord absoluto absoluto
+                                df_records = df_marcas.groupby("ejercicio")["e1rm"].max().reset_index()
+                                df_records.columns = ["⚡ Ejercicio", "🏋️ Récord Estimado (1RM)"]
+                                st.dataframe(df_records, hide_index=True, use_container_width=True)
+                            else:
+                                st.info("El atleta aún no tiene entrenamientos registrados para calcular marcas.")
+
+                        with sub_tab_gestion:
+                            st.warning("⚠️ Acciones destructivas de administración")
+                            confirmar_borrado = st.checkbox("Confirmo que quiero eliminar definitivamente a este atleta y TODO su historial de cargas", key=f"conf_del_{a['id']}")
+                            if st.button("🗑️ ELIMINAR ATLETA DEL SISTEMA", key=f"del_{a['id']}", disabled=not confirmar_borrado, type="primary", use_container_width=True):
+                                res_del = ejecutar_seguro(supabase.table("alumnos").delete().eq("id", a['id']), "No se pudo eliminar al atleta.")
+                                if res_del:
+                                    st.success(f"Atleta eliminado con éxito.")
+                                    time.sleep(1)
+                                    st.rerun()
 
         with ta5:
             st.markdown("### ✅ Aprobaciones de Nuevos Atletas")
