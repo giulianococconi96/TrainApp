@@ -196,13 +196,12 @@ def desarmar_clave_bloque(clave):
 # 🛡️ CONFIGURACIÓN DE CREDENCIALES ADMIN SECRETA
 # ==========================================
 ADMIN_USER = "giuliano"
-USANDO_HASH_FIJO = True
 
+# Obtenemos la pass maestra (en string o bytes si existe hash duro)
 try:
-    ADMIN_PASS_HASH = st.secrets["admin_pass_hash"].encode()
+    ADMIN_PASS_OBJ = st.secrets["admin_pass_hash"]
 except Exception:
-    ADMIN_PASS_HASH = b"magpower2026"
-    USANDO_HASH_FIJO = False
+    ADMIN_PASS_OBJ = "magpower2026"
 
 AVATAR_PREDETERMINADO = "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&q=80&w=200&h=200"
 
@@ -250,18 +249,29 @@ if not st.session_state["autenticado"]:
                 input_user = st.text_input("Usuario:").strip().lower()
                 input_pass = st.text_input("Contraseña:", type="password")
                 btn_login = st.form_submit_button("Entrar al Sistema 🚀", use_container_width=True)
+            
             if btn_login:
-                if USANDO_HASH_FIJO:
-                    es_pass_valida = bcrypt.checkpw(input_pass.encode(), ADMIN_PASS_HASH)
-                else:
-                    es_pass_valida = (input_pass.encode() == ADMIN_PASS_HASH)
+                # 1. Validación de Administrador Eficiente
+                es_admin = False
+                if input_user == ADMIN_USER:
+                    if isinstance(ADMIN_PASS_OBJ, str):
+                        if input_pass == ADMIN_PASS_OBJ:
+                            es_admin = True
+                    else:
+                        try:
+                            if bcrypt.checkpw(input_pass.encode(), str(ADMIN_PASS_OBJ).encode()):
+                                es_admin = True
+                        except Exception:
+                            if input_pass == str(ADMIN_PASS_OBJ):
+                                es_admin = True
 
-                if input_user == ADMIN_USER and es_pass_valida:
+                if es_admin:
                     st.session_state["autenticado"] = True
                     st.session_state["usuario_actual"] = "Prof. Giuliano"
                     st.session_state["rol_actual"] = "admin"
                     st.rerun()
                 else:
+                    # 2. Validación de Atletas contra Supabase
                     res = ejecutar_seguro(
                         supabase.table("alumnos").select("id, nombre_apellido, contrasena, estado").eq("usuario", input_user),
                         "No se pudo validar el usuario."
@@ -890,7 +900,7 @@ elif st.session_state["rol_actual"] == "admin":
         if st.button("🔄 PREPARAR COPIA DE SEGURIDAD", use_container_width=True):
             try:
                 res_al_bk = ejecutar_seguro(
-                    supabase.table("alumnos").select("id, nombre_apellido, usuario, fecha_nacimiento, peso, altura, deporte, objective, estado, created_at")
+                    supabase.table("alumnos").select("id, nombre_apellido, usuario, fecha_nacimiento, peso, altura, deporte, objetivo, estado, created_at")
                 )
                 res_rt_bk = ejecutar_seguro(supabase.table("rutinas_asignadas").select("*"))
                 res_as_bk = ejecutar_seguro(supabase.table("asistencia").select("*"))
