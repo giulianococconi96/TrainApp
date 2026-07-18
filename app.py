@@ -351,7 +351,6 @@ def monitor_en_vivo(rol, alumno_id):
 # ==========================================
 ADMIN_USER = "giuliano"
 try:
-    # Intenta buscar el secreto en las variables, si no, usa la por defecto
     ADMIN_PASS_MASTER = str(st.secrets.get("admin_pass_hash", "magpower2026")).strip()
 except Exception:
     ADMIN_PASS_MASTER = "magpower2026"
@@ -479,7 +478,7 @@ else:
             supabase.table("asistencia").select("id", count="exact").eq("alumno_id", alumno_id_logueado).eq("mes_ano", mes_actual_str)
         )
         racha_act = res_asist.count if (res_asist and res_asist.count is not None) else 0
-        st.sidebar.markdown(f"📆 Asistencias este mes: **{racha_act}**")
+        st.sidebar.sidebar.markdown(f"📆 Asistencias este mes: **{racha_act}**")
 
     if st.sidebar.button("🔒 Cerrar Sesión"):
         st.session_state["autenticado"] = False
@@ -579,7 +578,7 @@ else:
     # ==========================================
     elif st.session_state["rol_actual"] == "admin":
         res_ap = ejecutar_seguro(
-            supabase.table("alumnos").select("id, nombre_apellido").eq("estado", "approved" if "approved" in str(res_at) else "aprobado").order("nombre_apellido")
+            supabase.table("alumnos").select("id, nombre_apellido").eq("estado", "aprobado").order("nombre_apellido")
         )
         lista_alumnos_datos = res_ap.data if res_ap else []
         id_por_nombre = {a["nombre_apellido"]: a["id"] for a in lista_alumnos_datos}
@@ -807,7 +806,7 @@ else:
 
         with ta4:
             ra = ejecutar_seguro(
-                supabase.table("alumnos").select("id, nombre_apellido, deporte, peso, altura, objetivo, foto_perfil, fecha_nacimiento").eq("estado", "approved" if "approved" in str(res_at) else "aprobado")
+                supabase.table("alumnos").select("id, nombre_apellido, deporte, peso, altura, objetivo, foto_perfil, fecha_nacimiento").eq("estado", "aprobado")
             )
             for a in (ra.data if ra else []):
                 edad_a = calcular_edad(a.get("fecha_nacimiento"))
