@@ -65,6 +65,7 @@ def calcular_acwr(cargas_diarias: list) -> dict:
     hoy = obtener_fecha_hora_actual().date()
     df = pd.DataFrame(cargas_diarias)
 
+    # 🛡️ Protección anti-duplicación de cargas por series
     if "alumno_id" in df.columns and "fecha" in df.columns:
         df_sesiones = df.drop_duplicates(subset=["fecha", "alumno_id"]).copy()
     elif "fecha" in df.columns:
@@ -582,7 +583,7 @@ if st.session_state["rol_actual"] == "atleta":
 # ==========================================
 elif st.session_state["rol_actual"] == "admin":
     res_ap = ejecutar_seguro(
-        supabase.table("alumnos").select("id, nombre_apellido").eq("estado", "approved").order("nombre_apellido")
+        supabase.table("alumnos").select("id, nombre_apellido").eq("estado", "aprobado").order("nombre_apellido")
     )
     lista_alumnos_datos = res_ap.data if res_ap else []
     id_por_nombre = {a["nombre_apellido"]: a["id"] for a in lista_alumnos_datos}
@@ -811,7 +812,7 @@ elif st.session_state["rol_actual"] == "admin":
 
     with ta4:
         ra = ejecutar_seguro(
-            supabase.table("alumnos").select("id, nombre_apellido, deporte, peso, altura, objetivo, foto_perfil, fecha_nacimiento").eq("estado", "approved")
+            supabase.table("alumnos").select("id, nombre_apellido, deporte, peso, altura, objetivo, foto_perfil, fecha_nacimiento").eq("estado", "aprobado")
         )
         for a in (ra.data if ra else []):
             edad_a = calcular_edad(a.get("fecha_nacimiento"))
@@ -839,7 +840,7 @@ elif st.session_state["rol_actual"] == "admin":
                     st.write(f"🏃 **Atleta:** {p['nombre_apellido']} ({p['usuario']})")
                 with col_ap2:
                     if st.button("Aprobar Atleta", key=f"ap_{p['id']}", use_container_width=True):
-                        res_apr = ejecutar_seguro(supabase.table("alumnos").update({"estado":"approved"}).eq("id", p['id']))
+                        res_apr = ejecutar_seguro(supabase.table("alumnos").update({"estado":"aprobado"}).eq("id", p['id']))
                         if res_apr:
                             st.success(f"¡{p['nombre_apellido']} aprobado!")
                             time.sleep(1)
@@ -889,7 +890,7 @@ elif st.session_state["rol_actual"] == "admin":
         if st.button("🔄 PREPARAR COPIA DE SEGURIDAD", use_container_width=True):
             try:
                 res_al_bk = ejecutar_seguro(
-                    supabase.table("alumnos").select("id, nombre_apellido, usuario, fecha_nacimiento, peso, altura, deporte, objetivo, estado, created_at")
+                    supabase.table("alumnos").select("id, nombre_apellido, usuario, fecha_nacimiento, peso, altura, deporte, objective, estado, created_at")
                 )
                 res_rt_bk = ejecutar_seguro(supabase.table("rutinas_asignadas").select("*"))
                 res_as_bk = ejecutar_seguro(supabase.table("asistencia").select("*"))
