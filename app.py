@@ -219,12 +219,19 @@ def renderizar_tabla_entrenamiento(alumno_id, nombre_atleta, es_espejo=False):
     entradas_alumno = {}
     visibles = False
 
+    CLASE_TITULO_BLOQUE = {
+        "calentamiento": "bloque-titulo-calido",
+        "principal": "bloque-titulo",
+        "final": "bloque-titulo-frio",
+    }
+
     for bloque in SUB_BLOQUES:
         clave_buscada = armar_clave_bloque(dia_seleccionado, bloque["id"])
         ejs = [r for r in rutina_completa if r["bloque"] == clave_buscada]
         if ejs:
             visibles = True
-            st.markdown(f"<h4 style='color: #CCFF00; background-color: #1E293B; padding: 6px 10px; border-radius: 4px;'>{bloque['label']}</h4>", unsafe_allow_html=True)
+            clase_titulo = CLASE_TITULO_BLOQUE.get(bloque["id"], "bloque-titulo")
+            st.markdown(f"<div class='{clase_titulo}'>{bloque['label']}</div>", unsafe_allow_html=True)
 
             for idx, ej in enumerate(ejs):
                 nombre_ej = ej["ejercicio"]
@@ -232,32 +239,42 @@ def renderizar_tabla_entrenamiento(alumno_id, nombre_atleta, es_espejo=False):
                 reps_obj = ej["reps_objetivo"]
                 link_video = videos_por_nombre.get(nombre_ej, "")
 
-                with st.container():
-                    col1, col2 = st.columns([3, 1])
-                    with col1: st.markdown(f"🏋️‍♂️ **{nombre_ej}** (`{series_obj}S x {reps_obj}R`)")
-                    with col2:
-                        if link_video and "http" in link_video: st.markdown(f"[🎥 Video]({link_video})")
+                st.markdown("<div class='ej-card'>", unsafe_allow_html=True)
+                col1, col2 = st.columns([3, 1])
+                with col1: st.markdown(f"🏋️‍♂️ **{nombre_ej}** (`{series_obj}S x {reps_obj}R`)")
+                with col2:
+                    if link_video and "http" in link_video: st.markdown(f"[🎥 Video]({link_video})")
 
-                    if not bloque["es_fuerza"]:
-                        completado = st.checkbox("✅ Completado", key=f"chk_{sufijo}_{idx}_{nombre_ej.replace(' ','_')}")
-                        if completado:
-                            for s in range(1, series_obj + 1):
-                                entradas_alumno[(bloque["id"], nombre_ej, s, idx)] = {"ejercicio": nombre_ej, "serie": s, "kilos": 0.0, "reps_reales": 10}
-                    else:
-                        cols = st.columns(series_obj)
+                if not bloque["es_fuerza"]:
+                    completado = st.checkbox("✅ Completado", key=f"chk_{sufijo}_{idx}_{nombre_ej.replace(' ','_')}")
+                    if completado:
                         for s in range(1, series_obj + 1):
-                            with cols[s-1]:
-                                st.markdown(f"<p style='text-align: center; color: #CCFF00;'>S{s}</p>", unsafe_allow_html=True)
-                                k = st.number_input("kg", key=f"k_{sufijo}_{idx}_{s}", label_visibility="collapsed", step=0.5)
-                                r = st.number_input("R", key=f"r_{sufijo}_{idx}_{s}", label_visibility="collapsed", value=int(reps_obj) if str(reps_obj).isdigit() else 5)
-                                entradas_alumno[(bloque["id"], nombre_ej, s, idx)] = {"ejercicio": nombre_ej, "serie": s, "kilos": k, "reps_reales": r}
+                            entradas_alumno[(bloque["id"], nombre_ej, s, idx)] = {"ejercicio": nombre_ej, "serie": s, "kilos": 0.0, "reps_reales": 10, "rpe_ejercicio": None}
+                else:
+                    cols = st.columns(series_obj)
+                    for s in range(1, series_obj + 1):
+                        with cols[s-1]:
+                            st.markdown(f"<p style='text-align: center; color: {COLOR_PRIMARIO};'>S{s}</p>", unsafe_allow_html=True)
+                            k = st.number_input("kg", key=f"k_{sufijo}_{idx}_{s}", label_visibility="collapsed", step=0.5)
+                            r = st.number_input("R", key=f"r_{sufijo}_{idx}_{s}", label_visibility="collapsed", value=int(reps_obj) if str(reps_obj).isdigit() else 5)
+                            entradas_alumno[(bloque["id"], nombre_ej, s, idx)] = {"ejercicio": nombre_ej, "serie": s, "kilos": k, "reps_reales": r}
 
-                    notas = st.text_input("Notas:", key=f"not_{sufijo}_{idx}_{nombre_ej.replace(' ','_')}")
+                    rpe_ej = st.select_slider(
+                        "🔥 Percepción de esfuerzo de este ejercicio (RPE 1-10):",
+                        options=list(range(1, 11)), value=7,
+                        key=f"rpe_ej_{sufijo}_{idx}_{nombre_ej.replace(' ','_')}"
+                    )
                     for s in range(1, series_obj + 1):
                         clave_actual = (bloque["id"], nombre_ej, s, idx)
                         if clave_actual in entradas_alumno:
-                            entradas_alumno[clave_actual]["notas"] = notas
-                    st.divider()
+                            entradas_alumno[clave_actual]["rpe_ejercicio"] = rpe_ej
+
+                notas = st.text_input("Notas:", key=f"not_{sufijo}_{idx}_{nombre_ej.replace(' ','_')}")
+                for s in range(1, series_obj + 1):
+                    clave_actual = (bloque["id"], nombre_ej, s, idx)
+                    if clave_actual in entradas_alumno:
+                        entradas_alumno[clave_actual]["notas"] = notas
+                st.markdown("</div>", unsafe_allow_html=True)
 
     if visibles:
         st.markdown("#### 📊 Evaluación de la Carga de Trabajo")
@@ -299,6 +316,7 @@ def renderizar_tabla_entrenamiento(alumno_id, nombre_atleta, es_espejo=False):
                             "kilos": d["kilos"],
                             "reps_reales": d["reps_reales"],
                             "notas": d.get("notas", ""),
+                            "rpe_ejercicio": d.get("rpe_ejercicio"),
                             "rpe_global_sesion": rpe,
                             "duracion_minutos": duracion,
                             "srpe": srpe_calculado
@@ -312,7 +330,7 @@ def renderizar_tabla_entrenamiento(alumno_id, nombre_atleta, es_espejo=False):
                             ejecutar_seguro(supabase.table("asistencia").insert({"alumno_id": alumno_id, "fecha": fecha_hoy_limpia, "mes_ano": mes_ano}))
                             ejecutar_seguro(supabase.table("notificaciones").insert({
                                 "destinatario_tipo": "admin", "destinatario_id": None,
-                                "mensaje": f"🏃 {nombre_atleta} finalizó su sesión con sRPE = {srpe_calculado}."
+                                "mensaje": f"✅ Asistencia registrada: {nombre_atleta} completó su sesión (sRPE = {srpe_calculado})."
                             }))
 
                             res_tot = ejecutar_seguro(
@@ -320,10 +338,11 @@ def renderizar_tabla_entrenamiento(alumno_id, nombre_atleta, es_espejo=False):
                             )
                             total = res_tot.count if (res_tot and res_tot.count is not None) else 0
                             st.session_state["msj_pop"] = obtener_frase_motivacional(total)
-                            st.success("🚀 ¡Sesión enviada!")
+                            st.session_state["asistencia_ok"] = True
+                            st.success("✅ ¡Asistencia registrada y sesión enviada!")
                             st.rerun()
 
-@st.fragment(run_every=15)
+@st.fragment(run_every=8)
 def monitor_en_vivo(rol, alumno_id):
     if rol == "admin":
         res_n = ejecutar_seguro(
@@ -351,9 +370,13 @@ def monitor_en_vivo(rol, alumno_id):
 # ==========================================
 ADMIN_USER = "giuliano"
 try:
-    ADMIN_PASS_MASTER = str(st.secrets.get("admin_pass_hash", "magpower2026")).strip()
+    ADMIN_PASS_MASTER = str(st.secrets["admin_pass_hash"]).strip()
 except Exception:
-    ADMIN_PASS_MASTER = "magpower2026"
+    st.error(
+        "❌ Falta configurar `admin_pass_hash` en `.streamlit/secrets.toml`. "
+        "Por seguridad, el acceso de administrador no tiene contraseña por defecto."
+    )
+    st.stop()
 
 AVATAR_PREDETERMINADO = "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&q=80&w=200&h=200"
 
@@ -363,18 +386,101 @@ if "borrador_rutina" not in st.session_state:
 # Configuración Base de Streamlit
 st.set_page_config(page_title="TrainApp - Prof. Giuliano Cocconi", page_icon="⚡", layout="wide")
 
-st.markdown("""
+# ==========================================
+# 🎨 PALETA DE MARCA MAG POWER (colores vivos)
+# ==========================================
+COLOR_PRIMARIO = "#A3E635"     # lima vibrante (marca)
+COLOR_PRIMARIO_OSC = "#4D7C0F"
+COLOR_ACENTO_AZUL = "#38BDF8"
+COLOR_ACENTO_NARANJA = "#FB923C"
+COLOR_ACENTO_VIOLETA = "#A78BFA"
+COLOR_FONDO_CARD = "#111827"
+COLOR_FONDO_CARD_2 = "#1E293B"
+
+st.markdown(f"""
 <style>
-    div[data-testid="column"] { padding: 1px !important; }
-    input { text-align: center !important; }
-    .block-container { padding-top: 1.5rem !important; padding-bottom: 1.5rem !important; }
-    .profile-pic { border-radius: 50%; object-fit: cover; border: 3px solid #84CC16; }
+    @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap');
+
+    html, body, [class*="css"] {{ font-family: 'Manrope', sans-serif; }}
+
+    div[data-testid="column"] {{ padding: 3px !important; }}
+    input {{ text-align: center !important; }}
+    .block-container {{ padding-top: 1.2rem !important; padding-bottom: 2rem !important; max-width: 1200px; }}
+
+    .profile-pic {{ border-radius: 50%; object-fit: cover; border: 3px solid {COLOR_PRIMARIO}; box-shadow: 0 0 12px rgba(163,230,53,0.35); }}
+
+    /* Header con degradé de marca */
+    .app-header {{
+        background: linear-gradient(120deg, {COLOR_FONDO_CARD} 0%, {COLOR_FONDO_CARD_2} 60%, #0B1220 100%);
+        border: 1px solid rgba(163,230,53,0.25);
+        border-radius: 18px;
+        padding: 22px 26px;
+        margin-bottom: 18px;
+        text-align: center;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+    }}
+    .app-header h1 {{
+        margin: 0; font-size: 2.1rem; font-weight: 800; letter-spacing: 0.5px;
+        background: linear-gradient(90deg, {COLOR_PRIMARIO}, {COLOR_ACENTO_AZUL});
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }}
+    .app-header p {{ margin: 4px 0 0 0; color: #94A3B8; font-weight: 600; letter-spacing: 1px; font-size: 0.85rem; }}
+
+    /* Tarjetas genéricas */
+    .tp-card {{
+        background: {COLOR_FONDO_CARD_2};
+        border: 1px solid rgba(163,230,53,0.15);
+        border-radius: 14px;
+        padding: 14px 18px;
+        margin-bottom: 12px;
+    }}
+    .tp-card-title {{
+        color: {COLOR_PRIMARIO}; font-weight: 800; font-size: 0.95rem;
+        text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;
+    }}
+
+    /* Bloque de tabla de ejercicios */
+    .bloque-titulo {{
+        color: #0B1220; background: linear-gradient(90deg, {COLOR_PRIMARIO}, #BEF264);
+        padding: 8px 14px; border-radius: 8px; font-weight: 800; margin: 10px 0 8px 0;
+    }}
+    .bloque-titulo-calido {{
+        color: #0B1220; background: linear-gradient(90deg, {COLOR_ACENTO_NARANJA}, #FDBA74);
+        padding: 8px 14px; border-radius: 8px; font-weight: 800; margin: 10px 0 8px 0;
+    }}
+    .bloque-titulo-frio {{
+        color: #0B1220; background: linear-gradient(90deg, {COLOR_ACENTO_AZUL}, #7DD3FC);
+        padding: 8px 14px; border-radius: 8px; font-weight: 800; margin: 10px 0 8px 0;
+    }}
+
+    .ej-card {{
+        background: {COLOR_FONDO_CARD};
+        border-left: 4px solid {COLOR_PRIMARIO};
+        border-radius: 10px;
+        padding: 10px 14px;
+        margin-bottom: 10px;
+    }}
+
+    /* Badges de KPI (dashboards) */
+    .kpi-badge {{
+        display: inline-block; padding: 4px 10px; border-radius: 20px;
+        font-size: 0.75rem; font-weight: 700; letter-spacing: 0.3px;
+    }}
+
+    /* Botones primarios más vivos */
+    div.stButton > button[kind="primary"] {{
+        background: linear-gradient(90deg, {COLOR_PRIMARIO_OSC}, {COLOR_PRIMARIO}) !important;
+        border: none !important; color: #0B1220 !important; font-weight: 800 !important;
+    }}
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("<h1 style='text-align: center; margin-bottom: 0px;'>⚡ TRAINAPP</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center; color: #84CC16; font-weight: bold; letter-spacing: 1px; margin-top: 0px;'>PROF. GIULIANO COCCONI - PREPARACIÓN FÍSICA PERSONALIZADA</p>", unsafe_allow_html=True)
-st.divider()
+st.markdown("""
+<div class="app-header">
+    <h1>⚡ TRAINAPP</h1>
+    <p>PROF. GIULIANO COCCONI · PREPARACIÓN FÍSICA PERSONALIZADA · MAG POWER</p>
+</div>
+""", unsafe_allow_html=True)
 
 # Inicialización de Sesión
 if "autenticado" not in st.session_state:
@@ -404,7 +510,7 @@ if not st.session_state["autenticado"]:
             
             if btn_login:
                 # 1. VALIDACIÓN DIRECTA E INMUNE PARA EL ADMIN
-                if input_user == ADMIN_USER and (input_pass == ADMIN_PASS_MASTER or input_pass == "magpower2026"):
+                if input_user == ADMIN_USER and input_pass == ADMIN_PASS_MASTER:
                     st.session_state["autenticado"] = True
                     st.session_state["usuario_actual"] = "Prof. Giuliano"
                     st.session_state["rol_actual"] = "admin"
@@ -478,7 +584,7 @@ else:
             supabase.table("asistencia").select("id", count="exact").eq("alumno_id", alumno_id_logueado).eq("mes_ano", mes_actual_str)
         )
         racha_act = res_asist.count if (res_asist and res_asist.count is not None) else 0
-        st.sidebar.sidebar.markdown(f"📆 Asistencias este mes: **{racha_act}**")
+        st.sidebar.markdown(f"📆 Asistencias este mes: **{racha_act}**")
 
     if st.sidebar.button("🔒 Cerrar Sesión"):
         st.session_state["autenticado"] = False
@@ -492,8 +598,11 @@ else:
 
     if "msj_pop" in st.session_state:
         st.balloons()
+        if st.session_state.get("asistencia_ok"):
+            st.toast("✅ Asistencia registrada correctamente.", icon="📆")
         st.toast(st.session_state["msj_pop"], icon="🏆")
         del st.session_state["msj_pop"]
+        st.session_state.pop("asistencia_ok", None)
 
     # ==========================================
     # 🏃 INTERFAZ ATLETA
@@ -520,13 +629,31 @@ else:
         with t1:
             renderizar_tabla_entrenamiento(alumno_id_logueado, al, es_espejo=False)
         with t2:
-            st.markdown("### 📈 Evolución")
+            st.markdown("### 📈 Mi Dashboard de Progreso")
             rh = ejecutar_seguro(supabase.table("registros_entrenamiento").select("*").eq("alumno_id", alumno_id_logueado))
             if rh and rh.data:
                 df = pd.DataFrame(rh.data)
                 df["e1rm"] = df.apply(lambda r: calcular_e1rm(r["kilos"], r["reps_reales"]), axis=1)
                 df["fc"] = df["fecha"].apply(lambda f: f.split(" ")[0])
 
+                total_sesiones = df["fc"].nunique()
+                kg_totales = round((df["kilos"] * df["reps_reales"]).sum(), 0)
+                mes_actual_prog = obtener_fecha_hora_actual().strftime("%m-%Y")
+                sesiones_mes = df[df["fc"].str.startswith(mes_actual_prog.split("-")[1] + "-" + mes_actual_prog.split("-")[0])]["fc"].nunique() if not df.empty else 0
+
+                col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
+                with col_kpi1: st.metric("🏋️ Sesiones totales", total_sesiones)
+                with col_kpi2: st.metric("📅 Sesiones este mes", sesiones_mes)
+                with col_kpi3: st.metric("🔋 Volumen total movido", f"{kg_totales:,.0f} kg")
+
+                st.markdown("#### 📦 Volumen de Entrenamiento por Semana")
+                df["fecha_dt"] = pd.to_datetime(df["fc"])
+                df["semana"] = df["fecha_dt"].dt.strftime("%Y-S%U")
+                df["volumen"] = df["kilos"] * df["reps_reales"]
+                df_semana = df.groupby("semana")["volumen"].sum().reset_index().sort_values("semana")
+                st.bar_chart(df_semana.set_index("semana"))
+
+                st.markdown("---")
                 sub_col1, sub_col2 = st.columns(2)
                 with sub_col1:
                     st.markdown("#### Historial de Fuerza Estimada (e1RM)")
@@ -564,7 +691,8 @@ else:
                     )
                     if res_msg: st.success("Enviado.")
         with t4:
-            f_subida = st.file_uploader("📸 Cambiar Foto:", type=["jpg","png","webp"])
+            st.markdown("<div class='tp-card'><div class='tp-card-title'>📸 Foto de Perfil</div>", unsafe_allow_html=True)
+            f_subida = st.file_uploader("Cambiar Foto:", type=["jpg","png","webp"])
             if f_subida and st.button("💾 Guardar Foto"):
                 url = subir_foto_perfil(f_subida, al)
                 if url:
@@ -572,6 +700,33 @@ else:
                     if res_upd:
                         st.success("Foto actualizada.")
                         st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
+
+            st.markdown("<div class='tp-card'><div class='tp-card-title'>📋 Mis Datos</div>", unsafe_allow_html=True)
+            res_perfil_completo = ejecutar_seguro(
+                supabase.table("alumnos").select("deporte, objetivo, peso, altura").eq("id", alumno_id_logueado)
+            )
+            perfil_actual = res_perfil_completo.data[0] if (res_perfil_completo and res_perfil_completo.data) else {}
+            with st.form("form_editar_perfil"):
+                col_pf1, col_pf2 = st.columns(2)
+                with col_pf1:
+                    nuevo_peso = st.number_input("⚖️ Peso Actual (kg):", min_value=1.0, value=float(perfil_actual.get("peso") or 70.0))
+                    nuevo_deporte = st.text_input("🏅 Deporte / Disciplina:", value=perfil_actual.get("deporte") or "")
+                with col_pf2:
+                    nueva_altura = st.number_input("📏 Altura Actual (m):", min_value=0.5, value=float(perfil_actual.get("altura") or 1.75))
+                    nuevo_objetivo = st.text_area("🎯 Objetivo principal:", value=perfil_actual.get("objetivo") or "")
+                if st.form_submit_button("💾 Guardar Cambios", use_container_width=True, type="primary"):
+                    res_upd_perfil = ejecutar_seguro(
+                        supabase.table("alumnos").update({
+                            "peso": nuevo_peso, "altura": nueva_altura,
+                            "deporte": nuevo_deporte.strip(), "objetivo": nuevo_objetivo.strip()
+                        }).eq("id", alumno_id_logueado),
+                        "No se pudieron guardar los cambios de perfil."
+                    )
+                    if res_upd_perfil:
+                        st.success("✅ Perfil actualizado correctamente.")
+                        st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
 
     # ==========================================
     # 👑 INTERFAZ COACH (ADMIN)
@@ -585,7 +740,52 @@ else:
         list_al = [a["nombre_apellido"] for a in lista_alumnos_datos]
         list_al_n = ["- Seleccionar -"] + list_al
 
-        ta1, ta2, ta3, ta4, ta5, ta6 = st.tabs(["📊 Historial y Carga", "📝 Planificar", "💬 Mensajes", "👥 Atletas", "✅ Aprobaciones", "📚 Biblioteca"])
+        ta0, ta1, ta2, ta3, ta4, ta5, ta6 = st.tabs(["🏠 Resumen General", "📊 Historial y Carga", "📝 Planificar", "💬 Mensajes", "👥 Atletas", "✅ Aprobaciones", "📚 Biblioteca"])
+
+        with ta0:
+            st.markdown("### 🏠 Dashboard General de Mag Power")
+
+            res_pend_kpi = ejecutar_seguro(supabase.table("alumnos").select("id", count="exact").eq("estado", "pendiente"))
+            pendientes_kpi = res_pend_kpi.count if (res_pend_kpi and res_pend_kpi.count is not None) else 0
+
+            hoy_kpi = obtener_fecha_hora_actual().date()
+            hace_7d = (hoy_kpi - timedelta(days=7)).strftime("%Y-%m-%d")
+            res_asist_semana = ejecutar_seguro(
+                supabase.table("asistencia").select("id", count="exact").gte("fecha", hace_7d)
+            )
+            asistencias_semana = res_asist_semana.count if (res_asist_semana and res_asist_semana.count is not None) else 0
+
+            col_g1, col_g2, col_g3, col_g4 = st.columns(4)
+            with col_g1: st.metric("🏃 Atletas Activos", len(lista_alumnos_datos))
+            with col_g2: st.metric("📆 Asistencias (últimos 7 días)", asistencias_semana)
+            with col_g3: st.metric("✅ Aprobaciones Pendientes", pendientes_kpi)
+            with col_g4:
+                res_msj_kpi = ejecutar_seguro(supabase.table("consultas_mensajes").select("id", count="exact").is_("respuesta", "null"))
+                msj_sin_resp = res_msj_kpi.count if (res_msj_kpi and res_msj_kpi.count is not None) else 0
+                st.metric("💬 Consultas sin responder", msj_sin_resp)
+
+            st.markdown("---")
+            st.markdown("#### 🚦 Estado de Carga (ACWR) de todos los atletas")
+            if lista_alumnos_datos:
+                filas_resumen = []
+                for a_kpi in lista_alumnos_datos:
+                    res_srpe_kpi = ejecutar_seguro(
+                        supabase.table("registros_entrenamiento").select("fecha, srpe, alumno_id").eq("alumno_id", a_kpi["id"])
+                    )
+                    datos_srpe_kpi = res_srpe_kpi.data if res_srpe_kpi else []
+                    if datos_srpe_kpi:
+                        acwr_kpi = calcular_acwr(datos_srpe_kpi)
+                        filas_resumen.append({
+                            "Atleta": a_kpi["nombre_apellido"],
+                            "ACWR": acwr_kpi["acwr"],
+                            "Estado": acwr_kpi["estado"]
+                        })
+                if filas_resumen:
+                    st.dataframe(pd.DataFrame(filas_resumen), hide_index=True, use_container_width=True)
+                else:
+                    st.info("Todavía no hay suficientes datos de entrenamiento para calcular el estado de carga.")
+            else:
+                st.info("No hay atletas activos todavía.")
 
         with ta1:
             st.markdown("### 📊 Panel de Control e Inteligencia de Carga de Trabajo")
@@ -603,13 +803,14 @@ else:
                     for dia in DIAS_PLANIF:
                         items_dia = [it for it in plan_actual if desarmar_clave_bloque(it["bloque"])[0] == dia["id"]]
                         if items_dia:
-                            st.markdown(f"**{dia['label']}**")
+                            st.markdown(f"<div class='tp-card'><div class='tp-card-title'>{dia['label']}</div>", unsafe_allow_html=True)
                             for bloque in SUB_BLOQUES:
                                 items_bloque = [it for it in items_dia if desarmar_clave_bloque(it["bloque"])[1] == bloque["id"]]
                                 if items_bloque:
                                     st.caption(bloque["label"])
                                     for it in items_bloque:
                                         st.write(f" └─ {it['ejercicio']} — {it['series_objetivo']} series x {it['reps_objetivo']} reps")
+                            st.markdown("</div>", unsafe_allow_html=True)
                 else:
                     st.info("Este atleta no tiene ninguna planificación asignada todavía.")
 
@@ -773,7 +974,11 @@ else:
                             st.session_state["borrador_rutina"] = []
                             st.rerun()
                     with col_b2:
-                        if st.button("💾 PUBLICAR PLAN", use_container_width=True, type="primary"):
+                        confirmar_publicar = st.checkbox(
+                            f"Confirmo reemplazar el plan completo de {al_p}",
+                            key="conf_publicar_plan"
+                        )
+                        if st.button("💾 PUBLICAR PLAN", use_container_width=True, type="primary", disabled=not confirmar_publicar):
                             ejecutar_seguro(supabase.table("rutinas_asignadas").delete().eq("alumno_id", id_p))
                             filas_plan = [{
                                 "alumno_id": id_p, "nombre_rutina": nom_r.strip(),
@@ -847,13 +1052,13 @@ else:
                                 for dia in DIAS_PLANIF:
                                     items_dia = [it for it in plan_atleta if desarmar_clave_bloque(it["bloque"])[0] == dia["id"]]
                                     if items_dia:
-                                        with st.container():
-                                            st.markdown(f"**{dia['label']}**")
-                                            for bloque in SUB_BLOQUES:
-                                                items_bloque = [it for it in items_dia if desarmar_clave_bloque(it["bloque"])[1] == bloque["id"]]
-                                                if items_bloque:
-                                                    ejs_texto = ", ".join([f"{it['ejercicio']} ({it['series_objetivo']}x{it['reps_objetivo']})" for it in items_bloque])
-                                                    st.caption(f"  └─ *{bloque['label']}:* {ejs_texto}")
+                                        st.markdown(f"<div class='tp-card'><div class='tp-card-title'>{dia['label']}</div>", unsafe_allow_html=True)
+                                        for bloque in SUB_BLOQUES:
+                                            items_bloque = [it for it in items_dia if desarmar_clave_bloque(it["bloque"])[1] == bloque["id"]]
+                                            if items_bloque:
+                                                ejs_texto = ", ".join([f"{it['ejercicio']} ({it['series_objetivo']}x{it['reps_objetivo']})" for it in items_bloque])
+                                                st.caption(f"  └─ *{bloque['label']}:* {ejs_texto}")
+                                        st.markdown("</div>", unsafe_allow_html=True)
                             else:
                                 st.info("Este atleta no tiene rutinas asignadas en este momento.")
 
