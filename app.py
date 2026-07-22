@@ -199,7 +199,7 @@ def renderizar_tabla_entrenamiento(alumno_id, nombre_atleta, es_espejo=False):
         return
     sufijo = "esp" if es_espejo else "atl"
     res_rut = ejecutar_seguro(
-        supabase.table("rutinas_asignadas").select("*").eq("alumno_id", alumno_id),
+        supabase.table("rutinas_asignadas").select("*").eq("alumno_id", alumno_id).eq("activo", True),
         "No se pudo cargar la rutina."
     )
     rutina_completa = res_rut.data if res_rut else []
@@ -787,7 +787,7 @@ else:
                 id_r = id_por_nombre[al_r]
 
                 st.markdown("#### 📋 Planificación Asignada Actual")
-                res_r_act = ejecutar_seguro(supabase.table("rutinas_asignadas").select("*").eq("alumno_id", id_r))
+                res_r_act = ejecutar_seguro(supabase.table("rutinas_asignadas").select("*").eq("alumno_id", id_r).eq("activo", True))
                 plan_actual = res_r_act.data if res_r_act else []
 
                 if plan_actual:
@@ -861,7 +861,7 @@ else:
                 else:
                     id_origen = id_por_nombre[atleta_origen]
                     id_destino = id_por_nombre[atleta_destino]
-                    res_clon_or = ejecutar_seguro(supabase.table("rutinas_asignadas").select("*").eq("alumno_id", id_origen))
+                    res_clon_or = ejecutar_seguro(supabase.table("rutinas_asignadas").select("*").eq("alumno_id", id_origen).eq("activo", True))
                     data_origen = res_clon_or.data if res_clon_or else []
                     if not data_origen:
                         st.warning(f"⚠️ El atleta {atleta_origen} no tiene una rutina activa para copiar.")
@@ -875,12 +875,12 @@ else:
                             st.warning(f"⚠️ El atleta {atleta_origen} no tiene ejercicios configurados para ese día.")
                         else:
                             if modo_clon == "Copiar Rutina Completa":
-                                ejecutar_seguro(supabase.table("rutinas_asignadas").delete().eq("alumno_id", id_destino))
+                                ejecutar_seguro(supabase.table("rutinas_asignadas").update({"activo": False}).eq("alumno_id", id_destino).eq("activo", True))
                             else:
-                                res_dest_ant = ejecutar_seguro(supabase.table("rutinas_asignadas").select("id, bloque").eq("alumno_id", id_destino))
-                                ids_a_borrar = [item["id"] for item in (res_dest_ant.data if res_dest_ant else []) if desarmar_clave_bloque(item["bloque"])[0] == modo_clon]
-                                if ids_a_borrar:
-                                    ejecutar_seguro(supabase.table("rutinas_asignadas").delete().in_("id", ids_a_borrar))
+                                res_dest_ant = ejecutar_seguro(supabase.table("rutinas_asignadas").select("id, bloque").eq("alumno_id", id_destino).eq("activo", True))
+                                ids_a_archivar = [item["id"] for item in (res_dest_ant.data if res_dest_ant else []) if desarmar_clave_bloque(item["bloque"])[0] == modo_clon]
+                                if ids_a_archivar:
+                                    ejecutar_seguro(supabase.table("rutinas_asignadas").update({"activo": False}).in_("id", ids_a_archivar))
 
                             filas_clon = [{
                                 "alumno_id": id_destino,
@@ -889,7 +889,8 @@ else:
                                 "ejercicio_id": item.get("ejercicio_id"),
                                 "bloque": item["bloque"],
                                 "series_objetivo": item["series_objetivo"],
-                                "reps_objetivo": item["reps_objetivo"]
+                                "reps_objetivo": item["reps_objetivo"],
+                                "activo": True
                             } for item in ejercicios_a_clonar]
 
                             res_clon_ins = ejecutar_seguro(supabase.table("rutinas_asignadas").insert(filas_clon), "No se pudo clonar la rutina.")
@@ -968,15 +969,16 @@ else:
                             st.rerun()
                     with col_b2:
                         confirmar_publicar = st.checkbox(
-                            f"Confirmo reemplazar el plan completo de {al_p}",
+                            f"Confirmo publicar un nuevo plan activo para {al_p} (el anterior queda archivado, no se borra)",
                             key="conf_publicar_plan"
                         )
                         if st.button("💾 PUBLICAR PLAN", use_container_width=True, type="primary", disabled=not confirmar_publicar):
-                            ejecutar_seguro(supabase.table("rutinas_asignadas").delete().eq("alumno_id", id_p))
+                            ejecutar_seguro(supabase.table("rutinas_asignadas").update({"activo": False}).eq("alumno_id", id_p).eq("activo", True))
                             filas_plan = [{
                                 "alumno_id": id_p, "nombre_rutina": nom_r.strip(),
                                 "ejercicio": i["ejercicio"], "ejercicio_id": i.get("ejercicio_id"),
-                                "bloque": i["bloque"], "series_objetivo": i["series"], "reps_objetivo": i["reps"]
+                                "bloque": i["bloque"], "series_objetivo": i["series"], "reps_objetivo": i["reps"],
+                                "activo": True
                             } for i in st.session_state["borrador_rutina"]]
                             res_pub = ejecutar_seguro(supabase.table("rutinas_asignadas").insert(filas_plan), "No se pudo publicar el plan.")
                             if res_pub:
@@ -1041,7 +1043,7 @@ else:
                         sub_tab_plan, sub_tab_marcas, sub_tab_gestion = st.tabs(["📋 Plan Activo", "📈 Records (e1RM)", "⚙️ Zona de Peligro"])
                         
                         with sub_tab_plan:
-                            res_plan_atleta = ejecutar_seguro(supabase.table("rutinas_asignadas").select("*").eq("alumno_id", a['id']))
+                            res_plan_atleta = ejecutar_seguro(supabase.table("rutinas_asignadas").select("*").eq("alumno_id", a['id']).eq("activo", True))
                             plan_atleta = res_plan_atleta.data if res_plan_atleta else []
                             
                             if plan_atleta:
@@ -1119,25 +1121,47 @@ else:
                     df.iloc[:, 0] = df.iloc[:, 0].astype(str).str.strip()
                     df = df.drop_duplicates(subset=[df.columns[0]], keep="first").copy()
 
-                    res_existentes = ejecutar_seguro(supabase.table("biblioteca_ejercicios").select("nombre"))
-                    existentes_db = [e["nombre"] for e in res_existentes.data] if (res_existentes and res_existentes.data) else []
-                    existentes_normalizados = set(str(nombre).strip().lower() for nombre in existentes_db)
+                    res_existentes = ejecutar_seguro(supabase.table("biblioteca_ejercicios").select("id, nombre, link_video"))
+                    existentes_db = res_existentes.data if (res_existentes and res_existentes.data) else []
+                    existentes_por_nombre = {str(e["nombre"]).strip().lower(): e for e in existentes_db}
 
-                    lote = []
+                    lote_nuevos = []
+                    lote_actualizar = []  # (id, link_video) para completar links faltantes
                     for _, r in df.iterrows():
                         nombre_ej = str(r.iloc[0]).strip()
-                        if nombre_ej and nombre_ej.lower() not in existentes_normalizados:
-                            grupo = str(r.iloc[1]).strip() if (len(r) > 1 and pd.notna(r.iloc[1])) else "General"
-                            lote.append({"nombre": nombre_ej, "grupo_muscular": grupo})
+                        if not nombre_ej or nombre_ej.lower() == "nan":
+                            continue
+                        grupo = str(r.iloc[1]).strip() if (len(r) > 1 and pd.notna(r.iloc[1])) else "General"
+                        link = str(r.iloc[2]).strip() if (len(r) > 2 and pd.notna(r.iloc[2])) else ""
 
-                    if lote:
-                        res_carga = ejecutar_seguro(supabase.table("biblioteca_ejercicios").insert(lote), "No se pudo cargar el lote de ejercicios.")
+                        clave = nombre_ej.lower()
+                        if clave not in existentes_por_nombre:
+                            lote_nuevos.append({"nombre": nombre_ej, "grupo_muscular": grupo, "link_video": link})
+                        else:
+                            existente = existentes_por_nombre[clave]
+                            link_actual = str(existente.get("link_video") or "").strip()
+                            if link and not link_actual:
+                                lote_actualizar.append({"id": existente["id"], "link_video": link})
+
+                    total_nuevos, total_actualizados = 0, 0
+                    if lote_nuevos:
+                        res_carga = ejecutar_seguro(supabase.table("biblioteca_ejercicios").insert(lote_nuevos), "No se pudo cargar el lote de ejercicios nuevos.")
                         if res_carga:
-                            st.success(f"🎉 ¡Se cargaron exitosamente {len(lote)} ejercicios nuevos sin duplicados!")
-                            time.sleep(1)
-                            st.rerun()
+                            total_nuevos = len(lote_nuevos)
+
+                    if lote_actualizar:
+                        with st.spinner(f"Completando links de {len(lote_actualizar)} ejercicios existentes..."):
+                            for item in lote_actualizar:
+                                r_upd = ejecutar_seguro(supabase.table("biblioteca_ejercicios").update({"link_video": item["link_video"]}).eq("id", item["id"]))
+                                if r_upd:
+                                    total_actualizados += 1
+
+                    if total_nuevos or total_actualizados:
+                        st.success(f"🎉 Listo: {total_nuevos} ejercicios nuevos cargados y {total_actualizados} ejercicios existentes completados con su link de video.")
+                        time.sleep(1)
+                        st.rerun()
                     else:
-                        st.info("ℹ️ No hay ejercicios nuevos para agregar. Todos los elementos del archivo ya existen en tu biblioteca.")
+                        st.info("ℹ️ No hay ejercicios nuevos ni links faltantes para actualizar. Todo está al día.")
                 else:
                     st.warning("⚠️ El archivo seleccionado está vacío.")
 
