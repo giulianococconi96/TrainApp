@@ -208,7 +208,10 @@ def renderizar_tabla_entrenamiento(alumno_id, nombre_atleta, es_espejo=False):
         return
 
     res_bib = ejecutar_seguro(supabase.table("biblioteca_ejercicios").select("nombre, link_video"))
-    videos_por_nombre = {f["nombre"]: f.get("link_video", "") for f in (res_bib.data if res_bib else [])}
+    videos_por_nombre = {
+        str(f["nombre"]).strip().casefold(): f.get("link_video", "")
+        for f in (res_bib.data if res_bib else [])
+    }
 
     st.markdown(f"### 📋 Plan: {rutina_completa[0]['nombre_rutina']}", unsafe_allow_html=True)
     dia_seleccionado = st.selectbox(
@@ -237,13 +240,19 @@ def renderizar_tabla_entrenamiento(alumno_id, nombre_atleta, es_espejo=False):
                 nombre_ej = ej["ejercicio"]
                 series_obj = int(ej["series_objetivo"])
                 reps_obj = ej["reps_objetivo"]
-                link_video = videos_por_nombre.get(nombre_ej, "")
+                link_video = videos_por_nombre.get(str(nombre_ej).strip().casefold(), "")
 
                 with st.container(border=True):
                     col1, col2 = st.columns([3, 1])
                     with col1: st.markdown(f"🏋️‍♂️ **{nombre_ej}** (`{series_obj}S x {reps_obj}R`)")
                     with col2:
-                        if link_video and "http" in link_video: st.markdown(f"[🎥 Video]({link_video})")
+                        link_video_limpio = str(link_video).strip() if link_video else ""
+                        if link_video_limpio and link_video_limpio.lower().startswith("http"):
+                            try:
+                                st.link_button("🎥 Video", link_video_limpio, use_container_width=True)
+                            except AttributeError:
+                                # Fallback por si la versión de Streamlit no tiene st.link_button
+                                st.markdown(f"[🎥 Ver Video]({link_video_limpio})")
 
                     if not bloque["es_fuerza"]:
                         completado = st.checkbox("✅ Completado", key=f"chk_{sufijo}_{idx}_{nombre_ej.replace(' ','_')}")
