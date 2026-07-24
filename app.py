@@ -133,15 +133,31 @@ def calcular_edad(fecha_nac_str):
         return None
 
 def obtener_frase_motivacional(dias_acumulados):
-    frases = [
-        "¡Excelente primer paso! El camino a la alta competencia empieza hoy. 🚀",
-        "¡Buen comienzo! La constancia es el secreto del rendimiento. 💪",
-        f"¡Suma y sigue! Ya van {dias_acumulados} entrenamientos este mes. ¡Buen ritmo! ⚡",
-        f"¡Cuerpo e intención enfocados! Llevás {dias_acumulados} sesiones. No aflojes. 🔥",
-        f"¡Tremenda disciplina! {dias_acumulados} días dándolo todo. Te estás volviendo imparable. 👑",
-        f"El esfuerzo de hoy es el rendimiento del mañana. ¡{dias_acumulados} sesiones acumuladas! 🏆",
-        f"¡Nivel Élite! 🔥 {dias_acumulados} entrenamientos en el mes. Sos un ejemplo de consistencia. 🦅"
-    ]
+    if dias_acumulados <= 1:
+        frases = [
+            "¡Excelente primer paso! El camino a la alta competencia empieza hoy. 🚀",
+            "¡Arrancaste! El primer entrenamiento siempre es el más importante. 💪",
+        ]
+    elif dias_acumulados <= 4:
+        frases = [
+            f"¡Buen comienzo! Llevás {dias_acumulados} sesiones. La constancia es el secreto del rendimiento. 💪",
+            f"¡Vas tomando ritmo! {dias_acumulados} entrenamientos y sumando. 🔥",
+        ]
+    elif dias_acumulados <= 9:
+        frases = [
+            f"¡Suma y sigue! Ya van {dias_acumulados} entrenamientos este mes. ¡Buen ritmo! ⚡",
+            f"¡Cuerpo e intención enfocados! Llevás {dias_acumulados} sesiones. No aflojes. 🔥",
+        ]
+    elif dias_acumulados <= 14:
+        frases = [
+            f"¡Tremenda disciplina! {dias_acumulados} días dándolo todo. Te estás volviendo imparable. 👑",
+            f"El esfuerzo de hoy es el rendimiento del mañana. ¡{dias_acumulados} sesiones acumuladas! 🏆",
+        ]
+    else:
+        frases = [
+            f"¡Nivel Élite! 🔥 {dias_acumulados} entrenamientos en el mes. Sos un ejemplo de consistencia. 🦅",
+            f"¡{dias_acumulados} sesiones! Ese es el nivel de compromiso de los que llegan lejos. 👑",
+        ]
     return random.choice(frases)
 
 # ==========================================
@@ -323,7 +339,7 @@ def renderizar_tabla_entrenamiento(alumno_id, nombre_atleta, es_espejo=False):
                             "nro_serie": d["serie"],
                             "kilos": d["kilos"],
                             "reps_reales": d["reps_reales"],
-                            "notas": d.get("notas", ""),
+                            "notas": d.get("notas", "") if d["serie"] == 1 else "",
                             "rpe_ejercicio": d.get("rpe_ejercicio"),
                             "rpe_global_sesion": rpe,
                             "duracion_minutos": duracion,
@@ -618,7 +634,7 @@ else:
             texto_edad = f" · {edad_calculada} años" if edad_calculada is not None else ""
             st.markdown(f"<p style='color: #84CC16; font-weight: bold;'>🎯 Meta: {obj} ({dep}){texto_edad}</p>", unsafe_allow_html=True)
 
-        t1, t2, t3, t4 = st.tabs(["🏋️‍♂️ Mi Sesión", "📈 Mi Progreso", "💬 Dudas", "⚙️ Perfil"])
+        t1, t2, t3 = st.tabs(["🏋️‍♂️ Mi Sesión", "📈 Mi Progreso", "⚙️ Perfil"])
         with t1:
             renderizar_tabla_entrenamiento(alumno_id_logueado, al, es_espejo=False)
         with t2:
@@ -675,15 +691,6 @@ else:
                     st.caption("El ACWR ideal se sitúa entre 0.8 y 1.3. Valores superiores a 1.5 multiplican el riesgo de lesión.")
 
         with t3:
-            with st.form("msg"):
-                m = st.text_area("Consulta:")
-                if st.form_submit_button("Enviar") and m.strip():
-                    res_msg = ejecutar_seguro(
-                        supabase.table("consultas_mensajes").insert({"alumno_id": alumno_id_logueado, "mensaje": m.strip()}),
-                        "No se pudo enviar la consulta."
-                    )
-                    if res_msg: st.success("Enviado.")
-        with t4:
             with st.container(border=True):
                 st.markdown(f"<div class='tp-card-title'>📸 Foto de Perfil</div>", unsafe_allow_html=True)
                 f_subida = st.file_uploader("Cambiar Foto:", type=["jpg","png","webp"])
@@ -733,7 +740,7 @@ else:
         list_al = [a["nombre_apellido"] for a in lista_alumnos_datos]
         list_al_n = ["- Seleccionar -"] + list_al
 
-        ta0, ta1, ta2, ta3, ta4, ta5, ta6 = st.tabs(["🏠 Resumen General", "📊 Historial y Carga", "📝 Planificar", "💬 Mensajes", "👥 Atletas", "✅ Aprobaciones", "📚 Biblioteca"])
+        ta0, ta1, ta2, ta3, ta4, ta5 = st.tabs(["🏠 Resumen General", "📊 Historial y Carga", "📝 Planificar", "👥 Atletas", "✅ Aprobaciones", "📚 Biblioteca"])
 
         with ta0:
             st.markdown("### 🏠 Dashboard General")
@@ -753,9 +760,11 @@ else:
             with col_g2: st.metric("📆 Asistencias (últimos 7 días)", asistencias_semana)
             with col_g3: st.metric("✅ Aprobaciones Pendientes", pendientes_kpi)
             with col_g4:
-                res_msj_kpi = ejecutar_seguro(supabase.table("consultas_mensajes").select("id", count="exact").is_("respuesta", "null"))
-                msj_sin_resp = res_msj_kpi.count if (res_msj_kpi and res_msj_kpi.count is not None) else 0
-                st.metric("💬 Consultas sin responder", msj_sin_resp)
+                res_asist_hoy = ejecutar_seguro(
+                    supabase.table("asistencia").select("id", count="exact").eq("fecha", hoy_kpi.strftime("%Y-%m-%d"))
+                )
+                asist_hoy = res_asist_hoy.count if (res_asist_hoy and res_asist_hoy.count is not None) else 0
+                st.metric("✅ Sesiones de hoy", asist_hoy)
 
             st.markdown("---")
             st.markdown("#### 🚦 Estado de Carga (ACWR) de todos los atletas")
@@ -843,6 +852,123 @@ else:
         with ta2:
             st.markdown("### 📝 Diseñar Planificación")
 
+            st.markdown("#### ✍️ Planificación Manual")
+            al_p = st.selectbox("Planificar para:", list_al_n, key="sb_planificar_para")
+            if al_p != "- Seleccionar -":
+                id_p = id_por_nombre[al_p]
+
+                col_edit1, col_edit2 = st.columns([3, 1])
+                with col_edit1:
+                    nom_r = st.text_input("Nombre de la Rutina:", value=st.session_state.get("nombre_rutina_editando", ""))
+                with col_edit2:
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    if st.button("📥 Editar Rutina Activa", use_container_width=True, help="Carga la rutina activa de este atleta al borrador para modificarla."):
+                        res_edit = ejecutar_seguro(supabase.table("rutinas_asignadas").select("*").eq("alumno_id", id_p).eq("activo", True))
+                        data_edit = res_edit.data if res_edit else []
+                        if data_edit:
+                            st.session_state["borrador_rutina"] = [{
+                                "ejercicio": item["ejercicio"], "ejercicio_id": item.get("ejercicio_id"),
+                                "bloque": item["bloque"],
+                                "bloque_visual": f"{label_dia(desarmar_clave_bloque(item['bloque'])[0])} · {label_bloque(desarmar_clave_bloque(item['bloque'])[1])}",
+                                "series": item["series_objetivo"], "reps": item["reps_objetivo"]
+                            } for item in data_edit]
+                            st.session_state["nombre_rutina_editando"] = data_edit[0]["nombre_rutina"]
+                            st.success(f"✅ Rutina activa de {al_p} cargada al borrador. Modificala abajo y volvé a publicar.")
+                            st.rerun()
+                        else:
+                            st.info(f"ℹ️ {al_p} no tiene una rutina activa para editar. Armá una nueva desde cero.")
+
+                c1, c2 = st.columns(2)
+                with c1: dia_id_sel = st.selectbox("Día:", [d["id"] for d in DIAS_PLANIF], format_func=label_dia)
+                with c2: bloque_id_sel = st.selectbox("Bloque:", [b["id"] for b in SUB_BLOQUES], format_func=label_bloque)
+
+                tipo_carga = st.radio(
+                    "Modo de selección de ejercicio:",
+                    ["🔍 Buscar en Biblioteca por Patrón", "✍️ Escribir Ejercicio Manualmente (Libre / Aeróbico)"],
+                    horizontal=True
+                )
+
+                ej_nom = ""
+                ej_id_sel = None
+                if tipo_carga == "🔍 Buscar en Biblioteca por Patrón":
+                    res_pat = ejecutar_seguro(supabase.table("biblioteca_ejercicios").select("grupo_muscular"))
+                    patrones_disponibles = sorted(list(set([p["grupo_muscular"] for p in (res_pat.data if res_pat else []) if p["grupo_muscular"]])))
+
+                    if patrones_disponibles:
+                        patron_seleccionado = st.selectbox("Filtrar por patrón de movimiento:", ["- Todos los patrones -"] + patrones_disponibles)
+                        query_ejs = supabase.table("biblioteca_ejercicios").select("id, nombre").order("nombre")
+                        if patron_seleccionado != "- Todos los patrones -":
+                            query_ejs = query_ejs.eq("grupo_muscular", patron_seleccionado)
+                        res_ejs = ejecutar_seguro(query_ejs)
+                    else:
+                        res_ejs = ejecutar_seguro(supabase.table("biblioteca_ejercicios").select("id, nombre").order("nombre"))
+
+                    filas_ejs = res_ejs.data if res_ejs else []
+                    if filas_ejs:
+                        ej_nom = st.selectbox("Seleccionar Ejercicio:", [f["nombre"] for f in filas_ejs])
+                        ej_id_sel = next((f["id"] for f in filas_ejs if f["nombre"] == ej_nom), None)
+                    else:
+                        ej_nom = st.text_input("No hay ejercicios en la base de datos. Escribilo a mano:")
+                else:
+                    ej_nom = st.text_input("Escribí el ejercicio o trabajo aeróbico/libre:", placeholder="Ej: Pasadas 400m")
+
+                s_o = st.number_input("Series prescritas:", min_value=1, max_value=10, value=4)
+                r_o = st.text_input("Repeticiones objetivo:", "10")
+
+                if st.button("➕ Añadir Ejercicio al Borrador", use_container_width=True):
+                    if ej_nom.strip() == "" or nom_r.strip() == "":
+                        st.error("❌ Completa los campos obligatorios.")
+                    else:
+                        st.session_state["borrador_rutina"].append({
+                            "ejercicio": ej_nom, "ejercicio_id": ej_id_sel,
+                            "bloque": armar_clave_bloque(dia_id_sel, bloque_id_sel),
+                            "bloque_visual": f"{label_dia(dia_id_sel)} · {label_bloque(bloque_id_sel)}",
+                            "series": s_o, "reps": r_o
+                        })
+                        st.toast(f"✅ Añadido: {ej_nom}")
+
+                if st.session_state["borrador_rutina"]:
+                    st.markdown("### 📋 Pizarra Borrador")
+                    for idx_b, item_b in enumerate(st.session_state["borrador_rutina"]):
+                        col_pb1, col_pb2 = st.columns([5, 1])
+                        with col_pb1:
+                            st.markdown(f"**{item_b['ejercicio']}** — {item_b['bloque_visual']} (`{item_b['series']}S x {item_b['reps']}R`)")
+                        with col_pb2:
+                            if st.button("🗑️ Quitar", key=f"del_borr_{idx_b}", use_container_width=True):
+                                st.session_state["borrador_rutina"].pop(idx_b)
+                                st.rerun()
+
+                    col_b1, col_b2 = st.columns(2)
+                    with col_b1:
+                        if st.button("🗑️ Vaciar Borrador Actual", use_container_width=True):
+                            st.session_state["borrador_rutina"] = []
+                            st.session_state.pop("nombre_rutina_editando", None)
+                            st.rerun()
+                    with col_b2:
+                        confirmar_publicar = st.checkbox(
+                            f"Confirmo publicar un nuevo plan activo para {al_p} (el anterior queda archivado, no se borra)",
+                            key="conf_publicar_plan"
+                        )
+                        if st.button("💾 PUBLICAR PLAN", use_container_width=True, type="primary", disabled=not confirmar_publicar):
+                            ejecutar_seguro(supabase.table("rutinas_asignadas").update({"activo": False}).eq("alumno_id", id_p).eq("activo", True))
+                            filas_plan = [{
+                                "alumno_id": id_p, "nombre_rutina": nom_r.strip(),
+                                "ejercicio": i["ejercicio"], "ejercicio_id": i.get("ejercicio_id"),
+                                "bloque": i["bloque"], "series_objetivo": i["series"], "reps_objetivo": i["reps"],
+                                "activo": True
+                            } for i in st.session_state["borrador_rutina"]]
+                            res_pub = ejecutar_seguro(supabase.table("rutinas_asignadas").insert(filas_plan), "No se pudo publicar el plan.")
+                            if res_pub:
+                                ejecutar_seguro(supabase.table("notificaciones").insert({
+                                    "destinatario_tipo": "atleta", "destinatario_id": id_p,
+                                    "mensaje": f"🏋️‍♂️ El Profe Giuliano actualizó tu planificación: {nom_r.strip()}."
+                                }))
+                                st.session_state["borrador_rutina"] = []
+                                st.session_state.pop("nombre_rutina_editando", None)
+                                st.success("🎉 Planificación publicada de forma exitosa.")
+                                st.rerun()
+
+            st.divider()
             st.markdown("#### 👥 Clonar Rutina Existente")
             col_clon1, col_clon2, col_clon3 = st.columns(3)
             with col_clon1:
@@ -903,108 +1029,7 @@ else:
                                 time.sleep(1)
                                 st.rerun()
 
-            st.divider()
-            st.markdown("#### ✍️ Diseñar Nueva Planificación Manual")
-            al_p = st.selectbox("Planificar para:", list_al_n, key="sb_planificar_para")
-            if al_p != "- Seleccionar -":
-                id_p = id_por_nombre[al_p]
-                nom_r = st.text_input("Nombre de la Rutina:")
-                c1, c2 = st.columns(2)
-                with c1: dia_id_sel = st.selectbox("Día:", [d["id"] for d in DIAS_PLANIF], format_func=label_dia)
-                with c2: bloque_id_sel = st.selectbox("Bloque:", [b["id"] for b in SUB_BLOQUES], format_func=label_bloque)
-
-                tipo_carga = st.radio(
-                    "Modo de selección de ejercicio:",
-                    ["🔍 Buscar en Biblioteca por Patrón", "✍️ Escribir Ejercicio Manualmente (Libre / Aeróbico)"],
-                    horizontal=True
-                )
-
-                ej_nom = ""
-                ej_id_sel = None
-                if tipo_carga == "🔍 Buscar en Biblioteca por Patrón":
-                    res_pat = ejecutar_seguro(supabase.table("biblioteca_ejercicios").select("grupo_muscular"))
-                    patrones_disponibles = sorted(list(set([p["grupo_muscular"] for p in (res_pat.data if res_pat else []) if p["grupo_muscular"]])))
-
-                    if patrones_disponibles:
-                        patron_seleccionado = st.selectbox("Filtrar por patrón de movimiento:", ["- Todos los patrones -"] + patrones_disponibles)
-                        query_ejs = supabase.table("biblioteca_ejercicios").select("id, nombre").order("nombre")
-                        if patron_seleccionado != "- Todos los patrones -":
-                            query_ejs = query_ejs.eq("grupo_muscular", patron_seleccionado)
-                        res_ejs = ejecutar_seguro(query_ejs)
-                    else:
-                        res_ejs = ejecutar_seguro(supabase.table("biblioteca_ejercicios").select("id, nombre").order("nombre"))
-
-                    filas_ejs = res_ejs.data if res_ejs else []
-                    if filas_ejs:
-                        ej_nom = st.selectbox("Seleccionar Ejercicio:", [f["nombre"] for f in filas_ejs])
-                        ej_id_sel = next((f["id"] for f in filas_ejs if f["nombre"] == ej_nom), None)
-                    else:
-                        ej_nom = st.text_input("No hay ejercicios en la base de datos. Escribilo a mano:")
-                else:
-                    ej_nom = st.text_input("Escribí el ejercicio o trabajo aeróbico/libre:", placeholder="Ej: Pasadas 400m")
-
-                s_o = st.number_input("Series prescritas:", min_value=1, max_value=10, value=4)
-                r_o = st.text_input("Repeticiones objetivo:", "10")
-
-                if st.button("➕ Añadir Ejercicio al Borrador", use_container_width=True):
-                    if ej_nom.strip() == "" or nom_r.strip() == "":
-                        st.error("❌ Completa los campos obligatorios.")
-                    else:
-                        st.session_state["borrador_rutina"].append({
-                            "ejercicio": ej_nom, "ejercicio_id": ej_id_sel,
-                            "bloque": armar_clave_bloque(dia_id_sel, bloque_id_sel),
-                            "bloque_visual": f"{label_dia(dia_id_sel)} · {label_bloque(bloque_id_sel)}",
-                            "series": s_o, "reps": r_o
-                        })
-                        st.toast(f"✅ Añadido: {ej_nom}")
-
-                if st.session_state["borrador_rutina"]:
-                    st.markdown("### 📋 Pizarra Borrador")
-                    st.dataframe(pd.DataFrame(st.session_state["borrador_rutina"])[["ejercicio", "bloque_visual", "series", "reps"]])
-
-                    col_b1, col_b2 = st.columns(2)
-                    with col_b1:
-                        if st.button("🗑️ Vaciar Borrador Actual", use_container_width=True):
-                            st.session_state["borrador_rutina"] = []
-                            st.rerun()
-                    with col_b2:
-                        confirmar_publicar = st.checkbox(
-                            f"Confirmo publicar un nuevo plan activo para {al_p} (el anterior queda archivado, no se borra)",
-                            key="conf_publicar_plan"
-                        )
-                        if st.button("💾 PUBLICAR PLAN", use_container_width=True, type="primary", disabled=not confirmar_publicar):
-                            ejecutar_seguro(supabase.table("rutinas_asignadas").update({"activo": False}).eq("alumno_id", id_p).eq("activo", True))
-                            filas_plan = [{
-                                "alumno_id": id_p, "nombre_rutina": nom_r.strip(),
-                                "ejercicio": i["ejercicio"], "ejercicio_id": i.get("ejercicio_id"),
-                                "bloque": i["bloque"], "series_objetivo": i["series"], "reps_objetivo": i["reps"],
-                                "activo": True
-                            } for i in st.session_state["borrador_rutina"]]
-                            res_pub = ejecutar_seguro(supabase.table("rutinas_asignadas").insert(filas_plan), "No se pudo publicar el plan.")
-                            if res_pub:
-                                ejecutar_seguro(supabase.table("notificaciones").insert({
-                                    "destinatario_tipo": "atleta", "destinatario_id": id_p,
-                                    "mensaje": f"🏋️‍♂️ El Profe Giuliano actualizó tu planificación: {nom_r.strip()}."
-                                }))
-                                st.session_state["borrador_rutina"] = []
-                                st.success("🎉 Planificación publicada de forma exitosa.")
-                                st.rerun()
-
         with ta3:
-            al_m = st.selectbox("Chat Privado:", list_al_n)
-            if al_m != "- Seleccionar -":
-                id_m = id_por_nombre[al_m]
-                rm = ejecutar_seguro(supabase.table("consultas_mensajes").select("*").eq("alumno_id", id_m).order("id", desc=True))
-                txt_r = st.text_input("Responder:")
-                if st.button("Enviar Respuesta") and txt_r.strip():
-                    res_resp = ejecutar_seguro(supabase.table("consultas_mensajes").insert({"alumno_id": id_m, "mensaje": "(Profe)", "respuesta": txt_r.strip()}))
-                    if res_resp: st.rerun()
-                for m in (rm.data if rm else []):
-                    st.markdown(f"**{al_m}**: {m['mensaje']}")
-                    if m['respuesta']: st.markdown(f"**Giuliano**: {m['respuesta']}")
-                    st.divider()
-
-        with ta4:
             st.markdown("### 👥 Gestión y Fichas Técnicas de Atletas")
             ra = ejecutar_seguro(
                 supabase.table("alumnos").select("id, nombre_apellido, usuario, deporte, peso, altura, objetivo, foto_perfil, fecha_nacimiento").eq("estado", "aprobado").order("nombre_apellido")
@@ -1040,8 +1065,10 @@ else:
                         st.markdown("---")
                         
                         # Sub-pestañas internas dentro del atleta para no saturar la pantalla
-                        sub_tab_plan, sub_tab_marcas, sub_tab_gestion = st.tabs(["📋 Plan Activo", "📈 Records (e1RM)", "⚙️ Zona de Peligro"])
-                        
+                        sub_tab_plan, sub_tab_dash, sub_tab_marcas, sub_tab_hist, sub_tab_gestion = st.tabs(
+                            ["📋 Plan Activo", "📊 Dashboard", "📈 Records (e1RM)", "🕓 Rutinas Anteriores", "⚙️ Zona de Peligro"]
+                        )
+
                         with sub_tab_plan:
                             res_plan_atleta = ejecutar_seguro(supabase.table("rutinas_asignadas").select("*").eq("alumno_id", a['id']).eq("activo", True))
                             plan_atleta = res_plan_atleta.data if res_plan_atleta else []
@@ -1061,6 +1088,38 @@ else:
                             else:
                                 st.info("Este atleta no tiene rutinas asignadas en este momento.")
 
+                        with sub_tab_dash:
+                            res_dash_a = ejecutar_seguro(supabase.table("registros_entrenamiento").select("*").eq("alumno_id", a['id']))
+                            data_dash_a = res_dash_a.data if res_dash_a else []
+                            if data_dash_a:
+                                df_da = pd.DataFrame(data_dash_a)
+                                df_da["fc"] = df_da["fecha"].apply(lambda f: f.split(" ")[0])
+                                total_ses_a = df_da["fc"].nunique()
+                                kg_tot_a = round((df_da["kilos"] * df_da["reps_reales"]).sum(), 0)
+                                mes_act_a = obtener_fecha_hora_actual().strftime("%m-%Y")
+                                ses_mes_a = df_da[df_da["fc"].str.startswith(mes_act_a.split("-")[1] + "-" + mes_act_a.split("-")[0])]["fc"].nunique()
+
+                                col_da1, col_da2, col_da3 = st.columns(3)
+                                with col_da1: st.metric("🏋️ Sesiones totales", total_ses_a)
+                                with col_da2: st.metric("📅 Sesiones este mes", ses_mes_a)
+                                with col_da3: st.metric("🔋 Volumen total movido", f"{kg_tot_a:,.0f} kg")
+
+                                st.markdown("##### 📦 Volumen por Semana")
+                                df_da["fecha_dt"] = pd.to_datetime(df_da["fc"])
+                                df_da["semana"] = df_da["fecha_dt"].dt.strftime("%Y-S%U")
+                                df_da["volumen"] = df_da["kilos"] * df_da["reps_reales"]
+                                df_sem_a = df_da.groupby("semana")["volumen"].sum().reset_index().sort_values("semana")
+                                st.bar_chart(df_sem_a.set_index("semana"))
+
+                                acwr_a = calcular_acwr(data_dash_a)
+                                col_ac1, col_ac2, col_ac3 = st.columns(3)
+                                with col_ac1: st.metric("Carga Aguda (7d)", f"{acwr_a['aguda']} U.A.")
+                                with col_ac2: st.metric("Carga Crónica (28d)", f"{acwr_a['cronica']} U.A.")
+                                with col_ac3: st.metric("ACWR", acwr_a["acwr"])
+                                st.markdown(f"**Estado:** <span style='color:{acwr_a['color']}; font-weight:bold;'>{acwr_a['estado']}</span>", unsafe_allow_html=True)
+                            else:
+                                st.info("Este atleta todavía no registró entrenamientos.")
+
                         with sub_tab_marcas:
                             res_marcas = ejecutar_seguro(supabase.table("registros_entrenamiento").select("ejercicio, kilos, reps_reales").eq("alumno_id", a['id']))
                             marcas_data = res_marcas.data if res_marcas else []
@@ -1076,6 +1135,27 @@ else:
                             else:
                                 st.info("El atleta aún no tiene entrenamientos registrados para calcular marcas.")
 
+                        with sub_tab_hist:
+                            res_hist_r = ejecutar_seguro(supabase.table("rutinas_asignadas").select("*").eq("alumno_id", a['id']).eq("activo", False))
+                            hist_data = res_hist_r.data if res_hist_r else []
+                            if hist_data:
+                                nombres_hist = sorted(set(it["nombre_rutina"] for it in hist_data), reverse=True)
+                                st.caption("Rutinas reemplazadas anteriormente (se conservan como historial, ya no están activas).")
+                                for nombre_hist in nombres_hist:
+                                    items_hist = [it for it in hist_data if it["nombre_rutina"] == nombre_hist]
+                                    with st.expander(f"🕓 {nombre_hist}"):
+                                        for dia in DIAS_PLANIF:
+                                            items_dia_h = [it for it in items_hist if desarmar_clave_bloque(it["bloque"])[0] == dia["id"]]
+                                            if items_dia_h:
+                                                st.markdown(f"**{dia['label']}**")
+                                                for bloque in SUB_BLOQUES:
+                                                    items_bloque_h = [it for it in items_dia_h if desarmar_clave_bloque(it["bloque"])[1] == bloque["id"]]
+                                                    if items_bloque_h:
+                                                        ejs_texto_h = ", ".join([f"{it['ejercicio']} ({it['series_objetivo']}x{it['reps_objetivo']})" for it in items_bloque_h])
+                                                        st.caption(f"  └─ *{bloque['label']}:* {ejs_texto_h}")
+                            else:
+                                st.info("Este atleta todavía no tiene rutinas archivadas.")
+
                         with sub_tab_gestion:
                             st.warning("⚠️ Acciones destructivas de administración")
                             confirmar_borrado = st.checkbox("Confirmo que quiero eliminar definitivamente a este atleta y TODO su historial de cargas", key=f"conf_del_{a['id']}")
@@ -1086,7 +1166,7 @@ else:
                                     time.sleep(1)
                                     st.rerun()
 
-        with ta5:
+        with ta4:
             st.markdown("### ✅ Aprobaciones de Nuevos Atletas")
             rp = ejecutar_seguro(supabase.table("alumnos").select("id, nombre_apellido, usuario").eq("estado", "pendiente"))
             datos_pendientes = rp.data if rp else []
@@ -1106,7 +1186,7 @@ else:
                                 time.sleep(1)
                                 st.rerun()
 
-        with ta6:
+        with ta5:
             st.markdown("### Biblioteca de Ejercicios")
             if st.button("Vaciar Biblioteca"):
                 res_vac = ejecutar_seguro(supabase.table("biblioteca_ejercicios").delete().neq("id", 0))
