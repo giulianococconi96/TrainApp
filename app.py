@@ -135,7 +135,7 @@ def calcular_edad(fecha_nac_str):
 def obtener_frase_motivacional(dias_acumulados):
     if dias_acumulados <= 1:
         frases = [
-            "¡Excelente primer paso! El camino a la alta competencia empieza hoy. 🚀",
+            "¡Excelente primer paso! El camino hacia tus objetivos empieza hoy. 🚀",
             "¡Arrancaste! El primer entrenamiento siempre es el más importante. 💪",
         ]
     elif dias_acumulados <= 4:
@@ -146,7 +146,7 @@ def obtener_frase_motivacional(dias_acumulados):
     elif dias_acumulados <= 9:
         frases = [
             f"¡Suma y sigue! Ya van {dias_acumulados} entrenamientos este mes. ¡Buen ritmo! ⚡",
-            f"¡Cuerpo e intención enfocados! Llevás {dias_acumulados} sesiones. No aflojes. 🔥",
+            f"¡En cualquier momento te citan a la Selección! Llevás {dias_acumulados} sesiones. No aflojes. 🔥",
         ]
     elif dias_acumulados <= 14:
         frases = [
@@ -562,21 +562,30 @@ if not st.session_state["autenticado"]:
                 if reg_nombre.strip() == "" or reg_user.strip() == "" or reg_pass == "":
                     st.error("❌ Nombre, Usuario y Contraseña son obligatorios.")
                 else:
-                    foto_final = AVATAR_PREDETERMINADO
-                    if foto_subida:
-                        url = subir_foto_perfil(foto_subida, reg_user)
-                        if url: foto_final = url
-                    res_ins = ejecutar_seguro(
-                        supabase.table("alumnos").insert({
-                            "nombre_apellido": reg_nombre.strip(), "usuario": reg_user,
-                            "contrasena": hashear_password(reg_pass), "fecha_nacimiento": reg_nacimiento.strftime("%Y-%m-%d"),
-                            "peso": reg_peso, "altura": reg_altura, "deporte": reg_deporte, "objetivo": reg_obj,
-                            "estado": "pendiente", "foto_perfil": foto_final
-                        }),
-                        "No se pudo completar el registro (¿el usuario ya existe?)."
+                    res_check_user = ejecutar_seguro(
+                        supabase.table("alumnos").select("id").eq("usuario", reg_user)
                     )
-                    if res_ins:
-                        st.success("🎉 ¡Registro enviado! Quedó pendiente de aprobación.")
+                    if res_check_user and res_check_user.data:
+                        st.error("❌ Ese nombre de usuario ya está en uso. Probá con otro.")
+                    else:
+                        foto_final = AVATAR_PREDETERMINADO
+                        if foto_subida:
+                            url = subir_foto_perfil(foto_subida, reg_user)
+                            if url: foto_final = url
+                        try:
+                            supabase.table("alumnos").insert({
+                                "nombre_apellido": reg_nombre.strip(), "usuario": reg_user,
+                                "contrasena": hashear_password(reg_pass), "fecha_nacimiento": reg_nacimiento.strftime("%Y-%m-%d"),
+                                "peso": reg_peso, "altura": reg_altura, "deporte": reg_deporte, "objetivo": reg_obj,
+                                "estado": "pendiente", "foto_perfil": foto_final
+                            }).execute()
+                            st.success("🎉 ¡Registro enviado! Quedó pendiente de aprobación.")
+                        except Exception as e:
+                            texto_error = str(e).lower()
+                            if "duplicate" in texto_error or "unique" in texto_error or "usuario" in texto_error:
+                                st.error("❌ Ese nombre de usuario ya está en uso. Probá con otro.")
+                            else:
+                                st.error("⚠️ No se pudo completar el registro. Intentá nuevamente en unos minutos.")
     st.stop()
 
 else:
@@ -1023,7 +1032,7 @@ else:
                             if res_clon_ins:
                                 ejecutar_seguro(supabase.table("notificaciones").insert({
                                     "destinatario_tipo": "atleta", "destinatario_id": id_destino,
-                                    "mensaje": f"🏋️‍♂️ El Profe Giuliano actualizó tu plan copiando ejercicios de {atleta_origen}."
+                                    "mensaje": "🏋️‍♂️ El Profe Giuliano actualizó tu planificación."
                                 }))
                                 st.success(f"🚀 ¡Plan clonado de forma exitosa para {atleta_destino}!")
                                 time.sleep(1)
