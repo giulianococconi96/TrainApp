@@ -135,7 +135,7 @@ def calcular_edad(fecha_nac_str):
 def obtener_frase_motivacional(dias_acumulados):
     if dias_acumulados <= 1:
         frases = [
-            "¡Excelente primer paso! El camino hacia tus objetivos empieza hoy. 🚀",
+            "¡Excelente primer paso! El camino a la alta competencia empieza hoy. 🚀",
             "¡Arrancaste! El primer entrenamiento siempre es el más importante. 💪",
         ]
     elif dias_acumulados <= 4:
@@ -146,7 +146,7 @@ def obtener_frase_motivacional(dias_acumulados):
     elif dias_acumulados <= 9:
         frases = [
             f"¡Suma y sigue! Ya van {dias_acumulados} entrenamientos este mes. ¡Buen ritmo! ⚡",
-            f"¡En cualquier momento te citan a la Selección! Llevás {dias_acumulados} sesiones. No aflojes. 🔥",
+            f"¡Cuerpo e intención enfocados! Llevás {dias_acumulados} sesiones. No aflojes. 🔥",
         ]
     elif dias_acumulados <= 14:
         frases = [
@@ -506,7 +506,11 @@ if "alumno_id_actual" not in st.session_state:
 # =========================================================================
 
 if not st.session_state["autenticado"]:
-    login_mode = st.radio("Opción:", ["🔑 Iniciar Sesión", "👥 ¿Sos nuevo? Registrate acá 👤"], horizontal=True, label_visibility="collapsed")
+    login_mode = st.radio(
+        "Opción:",
+        ["🔑 Iniciar Sesión", "👥 ¿Sos nuevo? Registrate acá 👤", "🔓 ¿Olvidaste tu contraseña?"],
+        horizontal=True, label_visibility="collapsed"
+    )
 
     if login_mode == "🔑 Iniciar Sesión":
         st.markdown("<h3 style='text-align: center;'>🔐 Iniciar Sesión</h3>", unsafe_allow_html=True)
@@ -543,7 +547,7 @@ if not st.session_state["autenticado"]:
                             st.rerun()
                     else:
                         st.error("❌ Usuario o contraseña incorrectos.")
-    else:
+    elif login_mode == "👥 ¿Sos nuevo? Registrate acá 👤":
         st.markdown("<h3 style='text-align: center;'>📝 Registro de Atleta</h3>", unsafe_allow_html=True)
         col_r1, col_r2, col_r3 = st.columns([1, 2, 1])
         with col_r2:
@@ -586,6 +590,43 @@ if not st.session_state["autenticado"]:
                                 st.error("❌ Ese nombre de usuario ya está en uso. Probá con otro.")
                             else:
                                 st.error("⚠️ No se pudo completar el registro. Intentá nuevamente en unos minutos.")
+
+    else:
+        st.markdown("<h3 style='text-align: center;'>🔓 Recuperar Contraseña</h3>", unsafe_allow_html=True)
+        col_f1, col_f2, col_f3 = st.columns([1, 2, 1])
+        with col_f2:
+            st.caption("Para verificar tu identidad, necesitamos tu usuario y tu fecha de nacimiento (los mismos datos que cargaste al registrarte).")
+            with st.form("form_recuperar"):
+                rec_user = st.text_input("Usuario:").strip().lower()
+                rec_nacimiento = st.date_input("Fecha de Nacimiento:", value=date(2000, 1, 1))
+                rec_pass_nueva = st.text_input("Nueva Contraseña:", type="password")
+                rec_pass_confirmar = st.text_input("Confirmar Nueva Contraseña:", type="password")
+                btn_recuperar = st.form_submit_button("Restablecer Contraseña 🔓", use_container_width=True)
+
+            if btn_recuperar:
+                if not rec_user or not rec_pass_nueva:
+                    st.error("❌ Completá el usuario y la nueva contraseña.")
+                elif rec_pass_nueva != rec_pass_confirmar:
+                    st.error("❌ Las contraseñas no coinciden.")
+                elif len(rec_pass_nueva) < 4:
+                    st.error("❌ La contraseña debe tener al menos 4 caracteres.")
+                else:
+                    res_rec = ejecutar_seguro(
+                        supabase.table("alumnos").select("id, fecha_nacimiento").eq("usuario", rec_user),
+                        "No se pudo validar el usuario."
+                    )
+                    user_rec = res_rec.data if res_rec else None
+                    fecha_ingresada = rec_nacimiento.strftime("%Y-%m-%d")
+                    if user_rec and str(user_rec[0].get("fecha_nacimiento")) == fecha_ingresada:
+                        res_upd_pass = ejecutar_seguro(
+                            supabase.table("alumnos").update({"contrasena": hashear_password(rec_pass_nueva)}).eq("id", user_rec[0]["id"]),
+                            "No se pudo actualizar la contraseña."
+                        )
+                        if res_upd_pass:
+                            st.success("✅ ¡Contraseña actualizada! Ya podés iniciar sesión con tu nueva contraseña.")
+                    else:
+                        st.error("❌ Usuario o fecha de nacimiento incorrectos. Si no recordás estos datos, contactá al Profe Giuliano directamente.")
+
     st.stop()
 
 else:
