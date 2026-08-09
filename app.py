@@ -256,7 +256,7 @@ def renderizar_tabla_entrenamiento(alumno_id, nombre_atleta, es_espejo=False):
                 nombre_ej = ej["ejercicio"]
                 series_obj = int(ej["series_objetivo"])
                 reps_obj = ej["reps_objetivo"]
-                link_video = videos_por_nombre.get(str(nombre_ej).strip().casefold(), "")
+                link_video = ej.get("link_video") or videos_por_nombre.get(str(nombre_ej).strip().casefold(), "")
 
                 with st.container(border=True):
                     col1, col2 = st.columns([3, 1])
@@ -554,7 +554,10 @@ if not st.session_state["autenticado"]:
             reg_nombre = st.text_input("Nombre y Apellido completo:")
             reg_user = st.text_input("Nombre de Usuario (para ingresar):").strip().lower()
             reg_pass = st.text_input("Contraseña de Acceso:", type="password")
-            reg_nacimiento = st.date_input("Fecha de Nacimiento:", value=date(2000, 1, 1))
+            reg_nacimiento = st.date_input(
+                "Fecha de Nacimiento:", value=date(2000, 1, 1),
+                min_value=date(1950, 1, 1), max_value=obtener_fecha_hora_actual().date()
+            )
             reg_peso = st.number_input("Peso Actual (kg):", min_value=1.0, value=70.0)
             reg_altura = st.number_input("Altura Actual (m):", min_value=0.5, value=1.75)
             reg_deporte = st.text_input("Deporte / Disciplina:")
@@ -598,7 +601,10 @@ if not st.session_state["autenticado"]:
             st.caption("Para verificar tu identidad, necesitamos tu usuario y tu fecha de nacimiento (los mismos datos que cargaste al registrarte).")
             with st.form("form_recuperar"):
                 rec_user = st.text_input("Usuario:").strip().lower()
-                rec_nacimiento = st.date_input("Fecha de Nacimiento:", value=date(2000, 1, 1))
+                rec_nacimiento = st.date_input(
+                    "Fecha de Nacimiento:", value=date(2000, 1, 1),
+                    min_value=date(1950, 1, 1), max_value=obtener_fecha_hora_actual().date()
+                )
                 rec_pass_nueva = st.text_input("Nueva Contraseña:", type="password")
                 rec_pass_confirmar = st.text_input("Confirmar Nueva Contraseña:", type="password")
                 btn_recuperar = st.form_submit_button("Restablecer Contraseña 🔓", use_container_width=True)
@@ -920,7 +926,8 @@ else:
                                 "ejercicio": item["ejercicio"], "ejercicio_id": item.get("ejercicio_id"),
                                 "bloque": item["bloque"],
                                 "bloque_visual": f"{label_dia(desarmar_clave_bloque(item['bloque'])[0])} · {label_bloque(desarmar_clave_bloque(item['bloque'])[1])}",
-                                "series": item["series_objetivo"], "reps": item["reps_objetivo"]
+                                "series": item["series_objetivo"], "reps": item["reps_objetivo"],
+                                "link_video": item.get("link_video")
                             } for item in data_edit]
                             st.session_state["nombre_rutina_editando"] = data_edit[0]["nombre_rutina"]
                             st.success(f"✅ Rutina activa de {al_p} cargada al borrador. Modificala abajo y volvé a publicar.")
@@ -964,6 +971,11 @@ else:
 
                 s_o = st.number_input("Series prescritas:", min_value=1, max_value=10, value=4)
                 r_o = st.text_input("Repeticiones objetivo:", "10")
+                link_manual = st.text_input(
+                    "🔗 Link de video (opcional):",
+                    placeholder="Pegá acá tu propio link (YouTube, Drive, etc.) si querés usar uno distinto al de la Biblioteca",
+                    help="Si lo dejás vacío, se usa el video de la Biblioteca (si ese ejercicio tiene uno cargado)."
+                )
 
                 if st.button("➕ Añadir Ejercicio al Borrador", use_container_width=True):
                     if ej_nom.strip() == "" or nom_r.strip() == "":
@@ -973,7 +985,8 @@ else:
                             "ejercicio": ej_nom, "ejercicio_id": ej_id_sel,
                             "bloque": armar_clave_bloque(dia_id_sel, bloque_id_sel),
                             "bloque_visual": f"{label_dia(dia_id_sel)} · {label_bloque(bloque_id_sel)}",
-                            "series": s_o, "reps": r_o
+                            "series": s_o, "reps": r_o,
+                            "link_video": link_manual.strip() if link_manual.strip() else None
                         })
                         st.toast(f"✅ Añadido: {ej_nom}")
 
@@ -982,7 +995,8 @@ else:
                     for idx_b, item_b in enumerate(st.session_state["borrador_rutina"]):
                         col_pb1, col_pb2 = st.columns([5, 1])
                         with col_pb1:
-                            st.markdown(f"**{item_b['ejercicio']}** — {item_b['bloque_visual']} (`{item_b['series']}S x {item_b['reps']}R`)")
+                            indicador_link = " · 🔗" if item_b.get("link_video") else ""
+                            st.markdown(f"**{item_b['ejercicio']}** — {item_b['bloque_visual']} (`{item_b['series']}S x {item_b['reps']}R`){indicador_link}")
                         with col_pb2:
                             if st.button("🗑️ Quitar", key=f"del_borr_{idx_b}", use_container_width=True):
                                 st.session_state["borrador_rutina"].pop(idx_b)
@@ -1005,7 +1019,7 @@ else:
                                 "alumno_id": id_p, "nombre_rutina": nom_r.strip(),
                                 "ejercicio": i["ejercicio"], "ejercicio_id": i.get("ejercicio_id"),
                                 "bloque": i["bloque"], "series_objetivo": i["series"], "reps_objetivo": i["reps"],
-                                "activo": True
+                                "activo": True, "link_video": i.get("link_video")
                             } for i in st.session_state["borrador_rutina"]]
                             res_pub = ejecutar_seguro(supabase.table("rutinas_asignadas").insert(filas_plan), "No se pudo publicar el plan.")
                             if res_pub:
@@ -1066,7 +1080,7 @@ else:
                                 "bloque": item["bloque"],
                                 "series_objetivo": item["series_objetivo"],
                                 "reps_objetivo": item["reps_objetivo"],
-                                "activo": True
+                                "activo": True, "link_video": item.get("link_video")
                             } for item in ejercicios_a_clonar]
 
                             res_clon_ins = ejecutar_seguro(supabase.table("rutinas_asignadas").insert(filas_clon), "No se pudo clonar la rutina.")
