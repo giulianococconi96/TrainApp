@@ -8,6 +8,7 @@ import time
 from datetime import datetime, date, timedelta
 import pytz
 import io
+import secrets
 
 # ==========================================
 # 🔑 CONEXIÓN A SUPABASE (SOLO DESDE SECRETS)
@@ -161,6 +162,46 @@ def obtener_frase_motivacional(dias_acumulados):
     return random.choice(frases)
 
 # ==========================================
+# 💾 AUTOGUARDADO DE BORRADOR DE SESIÓN
+# ==========================================
+def guardar_borrador(alumno_id, dia, rpe, duracion, entradas_alumno):
+    try:
+        items_serializables = {
+            f"{clave[0]}|{clave[1]}|{clave[2]}": valor
+            for clave, valor in entradas_alumno.items()
+        }
+        supabase.table("borradores_sesion").upsert({
+            "alumno_id": alumno_id,
+            "dia": dia,
+            "rpe": rpe,
+            "duracion": duracion,
+            "datos": items_serializables
+        }, on_conflict="alumno_id").execute()
+    except Exception:
+        pass  # El autoguardado nunca debe interrumpir la experiencia del cliente
+
+def cargar_borrador(alumno_id):
+    try:
+        res = supabase.table("borradores_sesion").select("*").eq("alumno_id", alumno_id).execute()
+        if res.data:
+            fila = res.data[0]
+            items_reconstruidos = {}
+            for clave_str, valor in (fila.get("datos") or {}).items():
+                partes = clave_str.split("|")
+                if len(partes) == 3:
+                    items_reconstruidos[(partes[0], partes[1], int(partes[2]))] = valor
+            return {"dia": fila.get("dia"), "rpe": fila.get("rpe"), "duracion": fila.get("duracion"), "items": items_reconstruidos}
+    except Exception:
+        pass
+    return None
+
+def borrar_borrador(alumno_id):
+    try:
+        supabase.table("borradores_sesion").delete().eq("alumno_id", alumno_id).execute()
+    except Exception:
+        pass
+
+# ==========================================
 # 📸 STORAGE (SUBIR FOTO DE PERFIL)
 # ==========================================
 def subir_foto_perfil(archivo_imagen, usuario_slug) -> str:
@@ -238,6 +279,15 @@ def renderizar_tabla_entrenamiento(alumno_id, nombre_atleta, es_espejo=False):
     entradas_alumno = {}
     visibles = False
 
+    borrador_guardado = cargar_borrador(alumno_id) if not es_espejo else None
+    borrador_items = {}
+    borrador_restaurado = False
+    if borrador_guardado and borrador_guardado.get("dia") == dia_seleccionado:
+        borrador_items = borrador_guardado.get("items", {})
+        if borrador_items:
+            borrador_restaurado = True
+            st.success("🔄 Recuperamos el progreso que tenías cargado antes de que se cerrara la sesión.")
+
     CLASE_TITULO_BLOQUE = {
         "calentamiento": "bloque-titulo-calido",
         "principal": "bloque-titulo",
@@ -271,7 +321,8 @@ def renderizar_tabla_entrenamiento(alumno_id, nombre_atleta, es_espejo=False):
                                 st.markdown(f"[🎥 Ver Video]({link_video_limpio})")
 
                     if not bloque["es_fuerza"]:
-                        completado = st.checkbox("✅ Completado", key=f"chk_{sufijo}_{idx}_{nombre_ej.replace(' ','_')}")
+                        draft_completado = (bloque["id"], nombre_ej, 1) in borrador_items
+                        completado = st.checkbox("✅ Completado", value=draft_completado, key=f"chk_{sufijo}_{idx}_{nombre_ej.replace(' ','_')}")
                         if completado:
                             for s in range(1, series_obj + 1):
                                 entradas_alumno[(bloque["id"], nombre_ej, s, idx)] = {"ejercicio": nombre_ej, "serie": s, "kilos": 0.0, "reps_reales": 10, "rpe_ejercicio": None}
@@ -280,13 +331,17 @@ def renderizar_tabla_entrenamiento(alumno_id, nombre_atleta, es_espejo=False):
                         for s in range(1, series_obj + 1):
                             with cols[s-1]:
                                 st.markdown(f"<p style='text-align: center; color: {COLOR_PRIMARIO};'>S{s}</p>", unsafe_allow_html=True)
-                                k = st.number_input("kg", key=f"k_{sufijo}_{idx}_{s}", label_visibility="collapsed", step=0.5)
-                                r = st.number_input("R", key=f"r_{sufijo}_{idx}_{s}", label_visibility="collapsed", value=int(reps_obj) if str(reps_obj).isdigit() else 5)
+                                draft_serie = borrador_items.get((bloque["id"], nombre_ej, s), {})
+                                default_kg = float(draft_serie.get("kilos", 0.0) or 0.0)
+                                default_reps = int(draft_serie.get("reps_reales") or (int(reps_obj) if str(reps_obj).isdigit() else 5))
+                                k = st.number_input("kg", key=f"k_{sufijo}_{idx}_{s}", label_visibility="collapsed", step=0.5, value=default_kg)
+                                r = st.number_input("R", key=f"r_{sufijo}_{idx}_{s}", label_visibility="collapsed", value=default_reps)
                                 entradas_alumno[(bloque["id"], nombre_ej, s, idx)] = {"ejercicio": nombre_ej, "serie": s, "kilos": k, "reps_reales": r}
 
+                        draft_rpe_ej = borrador_items.get((bloque["id"], nombre_ej, 1), {}).get("rpe_ejercicio") or 7
                         rpe_ej = st.select_slider(
                             "🔥 Percepción de esfuerzo de este ejercicio (RPE 1-10):",
-                            options=list(range(1, 11)), value=7,
+                            options=list(range(1, 11)), value=draft_rpe_ej,
                             key=f"rpe_ej_{sufijo}_{idx}_{nombre_ej.replace(' ','_')}"
                         )
                         for s in range(1, series_obj + 1):
@@ -294,7 +349,8 @@ def renderizar_tabla_entrenamiento(alumno_id, nombre_atleta, es_espejo=False):
                             if clave_actual in entradas_alumno:
                                 entradas_alumno[clave_actual]["rpe_ejercicio"] = rpe_ej
 
-                    notas = st.text_input("Notas:", key=f"not_{sufijo}_{idx}_{nombre_ej.replace(' ','_')}")
+                    draft_notas = borrador_items.get((bloque["id"], nombre_ej, 1), {}).get("notas", "")
+                    notas = st.text_input("Notas:", value=draft_notas, key=f"not_{sufijo}_{idx}_{nombre_ej.replace(' ','_')}")
                     for s in range(1, series_obj + 1):
                         clave_actual = (bloque["id"], nombre_ej, s, idx)
                         if clave_actual in entradas_alumno:
@@ -304,12 +360,22 @@ def renderizar_tabla_entrenamiento(alumno_id, nombre_atleta, es_espejo=False):
         st.markdown("#### 📊 Evaluación de la Carga de Trabajo")
         col_ev1, col_ev2 = st.columns(2)
         with col_ev1:
-            rpe = st.select_slider("RPE Global de la Sesión (Esfuerzo Percibido 1-10):", options=list(range(1, 11)), value=7)
+            rpe = st.select_slider(
+                "RPE Global de la Sesión (Esfuerzo Percibido 1-10):",
+                options=list(range(1, 11)), value=(borrador_guardado.get("rpe") if borrador_guardado and borrador_guardado.get("dia") == dia_seleccionado else None) or 7
+            )
         with col_ev2:
-            duracion = st.number_input("Duración de la Sesión (minutos):", min_value=1, value=60)
+            duracion = st.number_input(
+                "Duración de la Sesión (minutos):", min_value=1,
+                value=(borrador_guardado.get("duracion") if borrador_guardado and borrador_guardado.get("dia") == dia_seleccionado else None) or 60
+            )
 
         srpe_calculado = calcular_srpe(rpe, duracion)
         st.info(f"💡 Carga de entrenamiento calculada (sRPE): **{srpe_calculado}** unidades arbitrarias (RPE {rpe} x {duracion} min).")
+
+        # Autoguardado silencioso: se ejecuta en cada interacción del cliente
+        if not es_espejo:
+            guardar_borrador(alumno_id, dia_seleccionado, rpe, duracion, entradas_alumno)
 
         if st.button("🏁 FINALIZAR ENTRENAMIENTO", use_container_width=True, type="primary", key=f"btn_fin_{sufijo}"):
             if es_espejo:
@@ -351,6 +417,7 @@ def renderizar_tabla_entrenamiento(alumno_id, nombre_atleta, es_espejo=False):
                             "No se pudo guardar la sesión."
                         )
                         if res_guardado:
+                            borrar_borrador(alumno_id)
                             ejecutar_seguro(supabase.table("asistencia").insert({"alumno_id": alumno_id, "fecha": fecha_hoy_limpia, "mes_ano": mes_ano}))
                             ejecutar_seguro(supabase.table("notificaciones").insert({
                                 "destinatario_tipo": "admin", "destinatario_id": None,
@@ -501,6 +568,27 @@ if "rol_actual" not in st.session_state:
 if "alumno_id_actual" not in st.session_state:
     st.session_state["alumno_id_actual"] = None
 
+# ==========================================
+# 🔁 SESIÓN PERSISTENTE ("RECORDARME")
+# Si la conexión se cortó y el usuario reabre el mismo enlace,
+# lo re-loguea automáticamente sin pedirle usuario/contraseña de nuevo.
+# ==========================================
+if not st.session_state["autenticado"]:
+    try:
+        token_url = st.query_params.get("t")
+    except Exception:
+        token_url = None
+    if token_url:
+        res_token = ejecutar_seguro(
+            supabase.table("alumnos").select("id, nombre_apellido, estado").eq("token_sesion", token_url)
+        )
+        user_token = res_token.data if res_token else None
+        if user_token and user_token[0]["estado"] == "aprobado":
+            st.session_state["autenticado"] = True
+            st.session_state["usuario_actual"] = user_token[0]["nombre_apellido"]
+            st.session_state["alumno_id_actual"] = user_token[0]["id"]
+            st.session_state["rol_actual"] = "atleta"
+
 # =========================================================================
 # 🔒 FLUJO DE CONTROL MAESTRO (IF/ELSE) DE SEGURIDAD
 # =========================================================================
@@ -540,6 +628,12 @@ if not st.session_state["autenticado"]:
                         if user_db[0]["estado"] == "pendiente":
                             st.warning("⏳ Tu cuenta está pendiente de aprobación.")
                         else:
+                            token_nuevo = secrets.token_urlsafe(24)
+                            ejecutar_seguro(supabase.table("alumnos").update({"token_sesion": token_nuevo}).eq("id", user_db[0]["id"]))
+                            try:
+                                st.query_params["t"] = token_nuevo
+                            except Exception:
+                                pass
                             st.session_state["autenticado"] = True
                             st.session_state["usuario_actual"] = user_db[0]["nombre_apellido"]
                             st.session_state["alumno_id_actual"] = user_db[0]["id"]
@@ -652,6 +746,12 @@ else:
         st.sidebar.markdown(f"📆 Asistencias este mes: **{racha_act}**")
 
     if st.sidebar.button("🔒 Cerrar Sesión"):
+        if st.session_state["rol_actual"] == "atleta" and alumno_id_logueado:
+            ejecutar_seguro(supabase.table("alumnos").update({"token_sesion": None}).eq("id", alumno_id_logueado))
+        try:
+            st.query_params.clear()
+        except Exception:
+            pass
         st.session_state["autenticado"] = False
         st.session_state["usuario_actual"] = ""
         st.session_state["rol_actual"] = ""
