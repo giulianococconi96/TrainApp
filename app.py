@@ -1334,19 +1334,40 @@ else:
                             hist_data = res_hist_r.data if res_hist_r else []
                             if hist_data:
                                 nombres_hist = sorted(set(it["nombre_rutina"] for it in hist_data), reverse=True)
-                                st.caption("Rutinas reemplazadas anteriormente (se conservan como historial, ya no están activas).")
+                                st.caption("Rutinas reemplazadas anteriormente (se conservan como historial, ya no están activas). Podés restaurar un día puntual sin afectar los demás días activos.")
                                 for nombre_hist in nombres_hist:
                                     items_hist = [it for it in hist_data if it["nombre_rutina"] == nombre_hist]
                                     with st.expander(f"🕓 {nombre_hist}"):
                                         for dia in DIAS_PLANIF:
                                             items_dia_h = [it for it in items_hist if desarmar_clave_bloque(it["bloque"])[0] == dia["id"]]
                                             if items_dia_h:
-                                                st.markdown(f"**{dia['label']}**")
-                                                for bloque in SUB_BLOQUES:
-                                                    items_bloque_h = [it for it in items_dia_h if desarmar_clave_bloque(it["bloque"])[1] == bloque["id"]]
-                                                    if items_bloque_h:
-                                                        ejs_texto_h = ", ".join([f"{it['ejercicio']} ({it['series_objetivo']}x{it['reps_objetivo']})" for it in items_bloque_h])
-                                                        st.caption(f"  └─ *{bloque['label']}:* {ejs_texto_h}")
+                                                col_h1, col_h2 = st.columns([4, 1])
+                                                with col_h1:
+                                                    st.markdown(f"**{dia['label']}**")
+                                                    for bloque in SUB_BLOQUES:
+                                                        items_bloque_h = [it for it in items_dia_h if desarmar_clave_bloque(it["bloque"])[1] == bloque["id"]]
+                                                        if items_bloque_h:
+                                                            ejs_texto_h = ", ".join([f"{it['ejercicio']} ({it['series_objetivo']}x{it['reps_objetivo']})" for it in items_bloque_h])
+                                                            st.caption(f"  └─ *{bloque['label']}:* {ejs_texto_h}")
+                                                with col_h2:
+                                                    if st.button("♻️ Restaurar", key=f"rest_{items_dia_h[0]['id']}", use_container_width=True):
+                                                        res_act_actual = ejecutar_seguro(supabase.table("rutinas_asignadas").select("id, bloque, nombre_rutina").eq("alumno_id", a['id']).eq("activo", True))
+                                                        activos_hoy = res_act_actual.data if res_act_actual else []
+
+                                                        # Si ya existe una rutina activa, restauramos bajo ese mismo nombre para no fragmentar
+                                                        nombre_destino = activos_hoy[0]["nombre_rutina"] if activos_hoy else nombre_hist
+
+                                                        # Archivamos lo que hoy esté activo para ESE día puntual (por si hay conflicto)
+                                                        ids_conflicto = [it["id"] for it in activos_hoy if desarmar_clave_bloque(it["bloque"])[0] == dia["id"]]
+                                                        if ids_conflicto:
+                                                            ejecutar_seguro(supabase.table("rutinas_asignadas").update({"activo": False}).in_("id", ids_conflicto))
+
+                                                        ids_a_restaurar = [it["id"] for it in items_dia_h]
+                                                        ejecutar_seguro(supabase.table("rutinas_asignadas").update({"activo": True, "nombre_rutina": nombre_destino}).in_("id", ids_a_restaurar))
+
+                                                        st.success(f"✅ {dia['label']} restaurado como activo dentro de \"{nombre_destino}\".")
+                                                        time.sleep(1)
+                                                        st.rerun()
                             else:
                                 st.info("Este atleta todavía no tiene rutinas archivadas.")
 
