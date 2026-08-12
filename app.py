@@ -1013,6 +1013,13 @@ else:
             if al_p != "- Seleccionar -":
                 id_p = id_por_nombre[al_p]
 
+                # Si cambiamos de atleta, refrescamos el nombre sugerido con el de su rutina activa actual
+                if st.session_state.get("nombre_rutina_atleta_id") != id_p:
+                    res_nombre_activo = ejecutar_seguro(supabase.table("rutinas_asignadas").select("nombre_rutina").eq("alumno_id", id_p).eq("activo", True))
+                    datos_nombre_activo = res_nombre_activo.data if res_nombre_activo else []
+                    st.session_state["nombre_rutina_editando"] = datos_nombre_activo[0]["nombre_rutina"] if datos_nombre_activo else ""
+                    st.session_state["nombre_rutina_atleta_id"] = id_p
+
                 col_edit1, col_edit2 = st.columns([3, 1])
                 with col_edit1:
                     nom_r = st.text_input("Nombre de la Rutina:", value=st.session_state.get("nombre_rutina_editando", ""))
@@ -1107,16 +1114,38 @@ else:
                         if st.button("🗑️ Vaciar Borrador Actual", use_container_width=True):
                             st.session_state["borrador_rutina"] = []
                             st.session_state.pop("nombre_rutina_editando", None)
+                            st.session_state.pop("nombre_rutina_atleta_id", None)
                             st.rerun()
                     with col_b2:
+                        dias_en_borrador = sorted(set(desarmar_clave_bloque(i["bloque"])[0] for i in st.session_state["borrador_rutina"]))
+                        dias_en_borrador_texto = ", ".join(label_dia(d) for d in dias_en_borrador)
+
+                        res_activa_prev = ejecutar_seguro(supabase.table("rutinas_asignadas").select("id, bloque, nombre_rutina").eq("alumno_id", id_p).eq("activo", True))
+                        activos_prev = res_activa_prev.data if res_activa_prev else []
+                        dias_activos_prev = set(desarmar_clave_bloque(it["bloque"])[0] for it in activos_prev)
+                        es_actualizacion_parcial = bool(activos_prev) and dias_en_borrador and set(dias_en_borrador) < dias_activos_prev
+
+                        if es_actualizacion_parcial:
+                            nombre_rutina_vigente = activos_prev[0]["nombre_rutina"]
+                            st.caption(f"ℹ️ Vas a actualizar **{dias_en_borrador_texto}** dentro de la rutina existente **\"{nombre_rutina_vigente}\"**. Los demás días quedan sin cambios.")
+                        else:
+                            st.caption(f"ℹ️ Vas a publicar **{dias_en_borrador_texto}** como rutina **\"{nom_r.strip()}\"**.")
+
                         confirmar_publicar = st.checkbox(
-                            f"Confirmo publicar un nuevo plan activo para {al_p} (el anterior queda archivado, no se borra)",
+                            f"Confirmo publicar el plan para {al_p} (solo se reemplazan los días incluidos arriba)",
                             key="conf_publicar_plan"
                         )
                         if st.button("💾 PUBLICAR PLAN", use_container_width=True, type="primary", disabled=not confirmar_publicar):
-                            ejecutar_seguro(supabase.table("rutinas_asignadas").update({"activo": False}).eq("alumno_id", id_p).eq("activo", True))
+                            nombre_final = nom_r.strip()
+                            if es_actualizacion_parcial:
+                                nombre_final = activos_prev[0]["nombre_rutina"]
+
+                            ids_a_archivar = [it["id"] for it in activos_prev if desarmar_clave_bloque(it["bloque"])[0] in dias_en_borrador]
+                            if ids_a_archivar:
+                                ejecutar_seguro(supabase.table("rutinas_asignadas").update({"activo": False}).in_("id", ids_a_archivar))
+
                             filas_plan = [{
-                                "alumno_id": id_p, "nombre_rutina": nom_r.strip(),
+                                "alumno_id": id_p, "nombre_rutina": nombre_final,
                                 "ejercicio": i["ejercicio"], "ejercicio_id": i.get("ejercicio_id"),
                                 "bloque": i["bloque"], "series_objetivo": i["series"], "reps_objetivo": i["reps"],
                                 "activo": True, "link_video": i.get("link_video")
@@ -1125,10 +1154,11 @@ else:
                             if res_pub:
                                 ejecutar_seguro(supabase.table("notificaciones").insert({
                                     "destinatario_tipo": "atleta", "destinatario_id": id_p,
-                                    "mensaje": f"🏋️‍♂️ El Profe Giuliano actualizó tu planificación: {nom_r.strip()}."
+                                    "mensaje": f"🏋️‍♂️ El Profe Giuliano actualizó tu planificación: {nombre_final}."
                                 }))
                                 st.session_state["borrador_rutina"] = []
                                 st.session_state.pop("nombre_rutina_editando", None)
+                                st.session_state.pop("nombre_rutina_atleta_id", None)
                                 st.success("🎉 Planificación publicada de forma exitosa.")
                                 st.rerun()
 
