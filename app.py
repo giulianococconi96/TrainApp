@@ -270,16 +270,27 @@ def renderizar_tabla_entrenamiento(alumno_id, nombre_atleta, es_espejo=False):
         for f in (res_bib.data if res_bib else [])
     }
 
+    borrador_guardado = cargar_borrador(alumno_id) if not es_espejo else None
+
     st.markdown(f"### 📋 Plan: {rutina_completa[0]['nombre_rutina']}", unsafe_allow_html=True)
+
+    opciones_dias = [d["id"] for d in DIAS_PLANIF]
+    key_dia = f"sb_dia_{sufijo}"
+    # Si hay un borrador guardado y todavía no elegimos día en esta sesión,
+    # arrancamos directamente en el día donde había quedado el progreso.
+    if key_dia not in st.session_state and borrador_guardado and borrador_guardado.get("dia") in opciones_dias:
+        indice_dia_default = opciones_dias.index(borrador_guardado.get("dia"))
+    else:
+        indice_dia_default = 0
+
     dia_seleccionado = st.selectbox(
-        "📆 Día:", options=[d["id"] for d in DIAS_PLANIF],
-        format_func=label_dia, key=f"sb_dia_{sufijo}"
+        "📆 Día:", options=opciones_dias,
+        format_func=label_dia, key=key_dia, index=indice_dia_default
     )
 
     entradas_alumno = {}
     visibles = False
 
-    borrador_guardado = cargar_borrador(alumno_id) if not es_espejo else None
     borrador_items = {}
     borrador_restaurado = False
     if borrador_guardado and borrador_guardado.get("dia") == dia_seleccionado:
@@ -287,6 +298,8 @@ def renderizar_tabla_entrenamiento(alumno_id, nombre_atleta, es_espejo=False):
         if borrador_items:
             borrador_restaurado = True
             st.success("🔄 Recuperamos el progreso que tenías cargado antes de que se cerrara la sesión.")
+    elif borrador_guardado and borrador_guardado.get("dia") and borrador_guardado.get("dia") != dia_seleccionado:
+        st.info(f"ℹ️ Tenés progreso guardado en **{label_dia(borrador_guardado.get('dia'))}**. Cambiá a ese día arriba para recuperarlo.")
 
     CLASE_TITULO_BLOQUE = {
         "calentamiento": "bloque-titulo-calido",
