@@ -291,15 +291,20 @@ def renderizar_tabla_entrenamiento(alumno_id, nombre_atleta, es_espejo=False):
     entradas_alumno = {}
     visibles = False
 
+    # Esta bandera vive en session_state, así que solo es "nueva" cuando la
+    # sesión del navegador realmente se reinició (reconexión). Mientras el
+    # cliente sigue interactuando con la app normalmente, no se re-evalúa.
+    clave_evaluacion = f"borrador_evaluado_{sufijo}"
+    es_primera_evaluacion_de_la_sesion = clave_evaluacion not in st.session_state
+    st.session_state[clave_evaluacion] = True
+
     borrador_items = {}
-    borrador_restaurado = False
-    if borrador_guardado and borrador_guardado.get("dia") == dia_seleccionado:
-        borrador_items = borrador_guardado.get("items", {})
-        if borrador_items:
-            borrador_restaurado = True
+    if es_primera_evaluacion_de_la_sesion:
+        if borrador_guardado and borrador_guardado.get("dia") == dia_seleccionado and borrador_guardado.get("items"):
+            borrador_items = borrador_guardado.get("items", {})
             st.success("🔄 Recuperamos el progreso que tenías cargado antes de que se cerrara la sesión.")
-    elif borrador_guardado and borrador_guardado.get("dia") and borrador_guardado.get("dia") != dia_seleccionado:
-        st.info(f"ℹ️ Tenés progreso guardado en **{label_dia(borrador_guardado.get('dia'))}**. Cambiá a ese día arriba para recuperarlo.")
+        elif borrador_guardado and borrador_guardado.get("dia") and borrador_guardado.get("dia") != dia_seleccionado:
+            st.info(f"ℹ️ Tenés progreso guardado en **{label_dia(borrador_guardado.get('dia'))}**. Cambiá a ese día arriba para recuperarlo.")
 
     CLASE_TITULO_BLOQUE = {
         "calentamiento": "bloque-titulo-calido",
@@ -770,6 +775,8 @@ else:
         st.session_state["rol_actual"] = ""
         st.session_state["alumno_id_actual"] = None
         st.session_state["borrador_rutina"] = []
+        st.session_state.pop("borrador_evaluado_atl", None)
+        st.session_state.pop("borrador_evaluado_esp", None)
         st.rerun()
 
     monitor_en_vivo(st.session_state["rol_actual"], alumno_id_logueado)
