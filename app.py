@@ -1062,6 +1062,20 @@ else:
                         else:
                             st.info(f"ℹ️ {al_p} no tiene una rutina activa para editar. Armá una nueva desde cero.")
 
+                with st.expander("🗑️ Eliminar la rutina activa completa (sin reemplazo)"):
+                    st.warning(f"⚠️ Esto archiva TODA la rutina activa de {al_p} (Día 1, Día 2 y Aeróbico) y no queda ninguna en pie hasta que publiques una nueva. Queda guardada en '🕓 Rutinas Anteriores' por si te arrepentís.")
+                    confirmar_borrado_rutina = st.checkbox(f"Confirmo eliminar toda la rutina activa de {al_p}", key="conf_borrar_rutina_activa")
+                    if st.button("🗑️ ELIMINAR RUTINA ACTIVA", disabled=not confirmar_borrado_rutina, use_container_width=True):
+                        res_borrar_activa = ejecutar_seguro(supabase.table("rutinas_asignadas").select("id").eq("alumno_id", id_p).eq("activo", True))
+                        ids_borrar_activa = [it["id"] for it in (res_borrar_activa.data if res_borrar_activa else [])]
+                        if ids_borrar_activa:
+                            ejecutar_seguro(supabase.table("rutinas_asignadas").update({"activo": False}).in_("id", ids_borrar_activa))
+                            st.success(f"✅ Rutina activa de {al_p} eliminada (archivada). Podés restaurarla desde 'Rutinas Anteriores' en la ficha del atleta.")
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.info(f"ℹ️ {al_p} ya no tenía ninguna rutina activa.")
+
                 c1, c2 = st.columns(2)
                 with c1: dia_id_sel = st.selectbox("Día:", [d["id"] for d in DIAS_PLANIF], format_func=label_dia)
                 with c2: bloque_id_sel = st.selectbox("Bloque:", [b["id"] for b in SUB_BLOQUES], format_func=label_bloque)
@@ -1119,15 +1133,60 @@ else:
 
                 if st.session_state["borrador_rutina"]:
                     st.markdown("### 📋 Pizarra Borrador")
-                    for idx_b, item_b in enumerate(st.session_state["borrador_rutina"]):
-                        col_pb1, col_pb2 = st.columns([5, 1])
+
+                    dias_presentes_borrador = sorted(set(
+                        desarmar_clave_bloque(i["bloque"])[0] for i in st.session_state["borrador_rutina"]
+                    ), key=lambda d: [x["id"] for x in DIAS_PLANIF].index(d) if d in [x["id"] for x in DIAS_PLANIF] else 99)
+                    opciones_filtro = ["📆 Todos los días"] + [label_dia(d) for d in dias_presentes_borrador]
+                    filtro_dia_pizarra = st.selectbox("Filtrar por día:", opciones_filtro, key="filtro_dia_pizarra")
+
+                    if filtro_dia_pizarra == "📆 Todos los días":
+                        dia_id_filtrado = None
+                    else:
+                        dia_id_filtrado = next(d for d in dias_presentes_borrador if label_dia(d) == filtro_dia_pizarra)
+
+                    def _clave_grupo(item):
+                        return item["bloque"]  # agrupa por (día, bloque) exacto
+
+                    indices_visibles = [
+                        idx_b for idx_b, item_b in enumerate(st.session_state["borrador_rutina"])
+                        if dia_id_filtrado is None or desarmar_clave_bloque(item_b["bloque"])[0] == dia_id_filtrado
+                    ]
+
+                    for idx_b in indices_visibles:
+                        item_b = st.session_state["borrador_rutina"][idx_b]
+                        col_pb1, col_pb2, col_pb3, col_pb4 = st.columns([5, 0.6, 0.6, 0.8])
                         with col_pb1:
                             indicador_link = " · 🔗" if item_b.get("link_video") else ""
                             st.markdown(f"**{item_b['ejercicio']}** — {item_b['bloque_visual']} (`{item_b['series']}S x {item_b['reps']}R`){indicador_link}")
                         with col_pb2:
-                            if st.button("🗑️ Quitar", key=f"del_borr_{idx_b}", use_container_width=True):
+                            # Sube: intercambia con el ejercicio anterior del MISMO día+bloque
+                            candidatos_arriba = [j for j in range(idx_b) if _clave_grupo(st.session_state["borrador_rutina"][j]) == _clave_grupo(item_b)]
+                            if st.button("⬆️", key=f"up_borr_{idx_b}", use_container_width=True, disabled=not candidatos_arriba):
+                                j = candidatos_arriba[-1]
+                                st.session_state["borrador_rutina"][idx_b], st.session_state["borrador_rutina"][j] = \
+                                    st.session_state["borrador_rutina"][j], st.session_state["borrador_rutina"][idx_b]
+                                st.rerun()
+                        with col_pb3:
+                            # Baja: intercambia con el ejercicio siguiente del MISMO día+bloque
+                            candidatos_abajo = [j for j in range(idx_b + 1, len(st.session_state["borrador_rutina"])) if _clave_grupo(st.session_state["borrador_rutina"][j]) == _clave_grupo(item_b)]
+                            if st.button("⬇️", key=f"down_borr_{idx_b}", use_container_width=True, disabled=not candidatos_abajo):
+                                j = candidatos_abajo[0]
+                                st.session_state["borrador_rutina"][idx_b], st.session_state["borrador_rutina"][j] = \
+                                    st.session_state["borrador_rutina"][j], st.session_state["borrador_rutina"][idx_b]
+                                st.rerun()
+                        with col_pb4:
+                            if st.button("🗑️", key=f"del_borr_{idx_b}", use_container_width=True, help="Quitar este ejercicio"):
                                 st.session_state["borrador_rutina"].pop(idx_b)
                                 st.rerun()
+
+                    if dia_id_filtrado is not None:
+                        if st.button(f"🗑️ Borrar todo {filtro_dia_pizarra} del borrador", use_container_width=True):
+                            st.session_state["borrador_rutina"] = [
+                                i for i in st.session_state["borrador_rutina"]
+                                if desarmar_clave_bloque(i["bloque"])[0] != dia_id_filtrado
+                            ]
+                            st.rerun()
 
                     col_b1, col_b2 = st.columns(2)
                     with col_b1:
