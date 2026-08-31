@@ -295,7 +295,7 @@ def generar_pdf_rutina(nombre_atleta, plan_items):
             pdf.set_font("Helvetica", "", 10)
             for it in items_bloque:
                 linea = f"   - {it['ejercicio']}: {it['series_objetivo']} series x {it['reps_objetivo']} reps"
-                pdf.multi_cell(0, 6, _limpiar_texto_pdf(linea))
+                pdf.multi_cell(0, 6, _limpiar_texto_pdf(linea), new_x="LMARGIN", new_y="NEXT")
         pdf.ln(3)
 
     salida = pdf.output()
