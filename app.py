@@ -339,6 +339,16 @@ def renderizar_tabla_entrenamiento(alumno_id, nombre_atleta, es_espejo=False):
 
     st.markdown(f"### 📋 Plan: {rutina_completa[0]['nombre_rutina']}", unsafe_allow_html=True)
 
+    if not es_espejo:
+        pdf_bytes_cliente = generar_pdf_rutina(nombre_atleta, rutina_completa)
+        if pdf_bytes_cliente:
+            nombre_archivo_pdf_cliente = f"Mi_Rutina_{nombre_atleta.replace(' ', '_')}_{obtener_fecha_hora_actual().strftime('%Y%m%d')}.pdf"
+            st.download_button(
+                "📄 Descargar mi rutina en PDF", data=pdf_bytes_cliente,
+                file_name=nombre_archivo_pdf_cliente, mime="application/pdf",
+                use_container_width=True, key=f"pdf_cliente_{sufijo}"
+            )
+
     opciones_dias = [d["id"] for d in DIAS_PLANIF]
     key_dia = f"sb_dia_{sufijo}"
     # Si hay un borrador guardado y todavía no elegimos día en esta sesión,
