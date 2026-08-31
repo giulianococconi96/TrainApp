@@ -60,6 +60,18 @@ def calcular_e1rm(peso: float, reps: int) -> float:
     if reps == 1: return float(peso)
     return round(peso * (1 + reps / 30.0), 1)
 
+def obtener_mapa_grupo_muscular():
+    """Trae el grupo muscular de cada ejercicio de la Biblioteca, para no sumar
+    volumen de patrones distintos (ej: sentadilla + curl de bíceps) como si fueran comparables."""
+    try:
+        res = supabase.table("biblioteca_ejercicios").select("nombre, grupo_muscular").execute()
+        return {
+            str(f["nombre"]).strip().casefold(): (f.get("grupo_muscular") or "Sin categorizar")
+            for f in (res.data or [])
+        }
+    except Exception:
+        return {}
+
 def calcular_acwr(cargas_diarias: list) -> dict:
     if not cargas_diarias or len(cargas_diarias) == 0:
         return {"aguda": 0.0, "cronica": 0.0, "acwr": 1.0, "estado": "Sin datos", "color": "#94A3B8"}
@@ -875,20 +887,31 @@ else:
                 df["fc"] = df["fecha"].apply(lambda f: f.split(" ")[0])
 
                 total_sesiones = df["fc"].nunique()
-                kg_totales = round((df["kilos"] * df["reps_reales"]).sum(), 0)
+                series_totales = len(df)
                 mes_actual_prog = obtener_fecha_hora_actual().strftime("%m-%Y")
                 sesiones_mes = df[df["fc"].str.startswith(mes_actual_prog.split("-")[1] + "-" + mes_actual_prog.split("-")[0])]["fc"].nunique() if not df.empty else 0
 
                 col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
                 with col_kpi1: st.metric("🏋️ Sesiones totales", total_sesiones)
                 with col_kpi2: st.metric("📅 Sesiones este mes", sesiones_mes)
-                with col_kpi3: st.metric("🔋 Volumen total movido", f"{kg_totales:,.0f} kg")
+                with col_kpi3: st.metric("🔢 Series totales realizadas", series_totales)
+                st.caption("El volumen se mide en series completadas, no en kg totales — sumar kilos de ejercicios distintos (ej: sentadilla + curl) no es una comparación válida.")
 
-                st.markdown("#### 📦 Volumen de Entrenamiento por Semana")
+                st.markdown("#### 📦 Volumen por Grupo Muscular (kg totales movidos)")
+                mapa_grupo_cliente = obtener_mapa_grupo_muscular()
+                df["grupo_muscular"] = df["ejercicio"].apply(lambda e: mapa_grupo_cliente.get(str(e).strip().casefold(), "Sin categorizar"))
+                df["volumen"] = df["kilos"] * df["reps_reales"]
+                df_grupo = df[df["volumen"] > 0].groupby("grupo_muscular")["volumen"].sum().reset_index().sort_values("volumen", ascending=False)
+                if not df_grupo.empty:
+                    st.bar_chart(df_grupo.set_index("grupo_muscular"))
+                    st.caption("Acá sí tiene sentido comparar kg, porque son ejercicios del mismo patrón/grupo muscular.")
+                else:
+                    st.info("Todavía no hay suficientes datos con peso cargado para desglosar por grupo muscular.")
+
+                st.markdown("#### 📅 Series Completadas por Semana")
                 df["fecha_dt"] = pd.to_datetime(df["fc"])
                 df["semana"] = df["fecha_dt"].dt.strftime("%Y-S%U")
-                df["volumen"] = df["kilos"] * df["reps_reales"]
-                df_semana = df.groupby("semana")["volumen"].sum().reset_index().sort_values("semana")
+                df_semana = df.groupby("semana").size().reset_index(name="series")
                 st.bar_chart(df_semana.set_index("semana"))
 
                 st.markdown("---")
@@ -1440,20 +1463,29 @@ else:
                                 df_da = pd.DataFrame(data_dash_a)
                                 df_da["fc"] = df_da["fecha"].apply(lambda f: f.split(" ")[0])
                                 total_ses_a = df_da["fc"].nunique()
-                                kg_tot_a = round((df_da["kilos"] * df_da["reps_reales"]).sum(), 0)
+                                series_tot_a = len(df_da)
                                 mes_act_a = obtener_fecha_hora_actual().strftime("%m-%Y")
                                 ses_mes_a = df_da[df_da["fc"].str.startswith(mes_act_a.split("-")[1] + "-" + mes_act_a.split("-")[0])]["fc"].nunique()
 
                                 col_da1, col_da2, col_da3 = st.columns(3)
                                 with col_da1: st.metric("🏋️ Sesiones totales", total_ses_a)
                                 with col_da2: st.metric("📅 Sesiones este mes", ses_mes_a)
-                                with col_da3: st.metric("🔋 Volumen total movido", f"{kg_tot_a:,.0f} kg")
+                                with col_da3: st.metric("🔢 Series totales realizadas", series_tot_a)
 
-                                st.markdown("##### 📦 Volumen por Semana")
+                                st.markdown("##### 📦 Volumen por Grupo Muscular (kg totales)")
+                                mapa_grupo_admin = obtener_mapa_grupo_muscular()
+                                df_da["grupo_muscular"] = df_da["ejercicio"].apply(lambda e: mapa_grupo_admin.get(str(e).strip().casefold(), "Sin categorizar"))
+                                df_da["volumen"] = df_da["kilos"] * df_da["reps_reales"]
+                                df_grupo_a = df_da[df_da["volumen"] > 0].groupby("grupo_muscular")["volumen"].sum().reset_index().sort_values("volumen", ascending=False)
+                                if not df_grupo_a.empty:
+                                    st.bar_chart(df_grupo_a.set_index("grupo_muscular"))
+                                else:
+                                    st.info("Todavía no hay suficientes datos con peso cargado para desglosar por grupo muscular.")
+
+                                st.markdown("##### 📅 Series por Semana")
                                 df_da["fecha_dt"] = pd.to_datetime(df_da["fc"])
                                 df_da["semana"] = df_da["fecha_dt"].dt.strftime("%Y-S%U")
-                                df_da["volumen"] = df_da["kilos"] * df_da["reps_reales"]
-                                df_sem_a = df_da.groupby("semana")["volumen"].sum().reset_index().sort_values("semana")
+                                df_sem_a = df_da.groupby("semana").size().reset_index(name="series")
                                 st.bar_chart(df_sem_a.set_index("semana"))
 
                                 acwr_a = calcular_acwr(data_dash_a)
