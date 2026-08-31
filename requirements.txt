@@ -4,3 +4,4 @@ bcrypt
 openpyxl
 supabase
 pytz
+fpdf2
