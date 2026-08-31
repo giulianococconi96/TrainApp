@@ -9,6 +9,7 @@ from datetime import datetime, date, timedelta
 import pytz
 import io
 import secrets
+from fpdf import FPDF
 
 # ==========================================
 # 🔑 CONEXIÓN A SUPABASE (SOLO DESDE SECRETS)
@@ -247,6 +248,58 @@ def armar_clave_bloque(dia_id, bloque_id):
 def desarmar_clave_bloque(clave):
     partes = str(clave).split("|")
     return (partes[0], partes[1]) if len(partes) == 2 else (clave, "")
+
+# ==========================================
+# 📄 EXPORTAR RUTINA A PDF
+# ==========================================
+def _limpiar_texto_pdf(texto):
+    # El motor de PDF usa Latin-1 (soporta tildes/ñ), pero no emojis: los descartamos sin romper el resto del texto.
+    return str(texto).encode("latin-1", "ignore").decode("latin-1").strip()
+
+def generar_pdf_rutina(nombre_atleta, plan_items):
+    if not plan_items:
+        return None
+
+    pdf = FPDF(format="A4")
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.set_text_color(20, 20, 20)
+    pdf.cell(0, 10, _limpiar_texto_pdf("TrainApp - Prof. Giuliano Cocconi"), new_x="LMARGIN", new_y="NEXT", align="C")
+
+    pdf.set_font("Helvetica", "", 11)
+    pdf.cell(0, 7, _limpiar_texto_pdf(f"Atleta: {nombre_atleta}"), new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 7, _limpiar_texto_pdf(f"Rutina: {plan_items[0].get('nombre_rutina', '')}"), new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 7, _limpiar_texto_pdf(f"Generado: {obtener_fecha_hora_actual().strftime('%d/%m/%Y %H:%M')}"), new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(4)
+
+    for dia in DIAS_PLANIF:
+        items_dia = [it for it in plan_items if desarmar_clave_bloque(it["bloque"])[0] == dia["id"]]
+        if not items_dia:
+            continue
+
+        pdf.set_fill_color(163, 230, 53)
+        pdf.set_text_color(20, 20, 20)
+        pdf.set_font("Helvetica", "B", 13)
+        pdf.cell(0, 9, _limpiar_texto_pdf(dia["label"]), new_x="LMARGIN", new_y="NEXT", fill=True)
+        pdf.set_text_color(0, 0, 0)
+        pdf.ln(1)
+
+        for bloque in SUB_BLOQUES:
+            items_bloque = [it for it in items_dia if desarmar_clave_bloque(it["bloque"])[1] == bloque["id"]]
+            if not items_bloque:
+                continue
+            pdf.set_font("Helvetica", "BI", 11)
+            pdf.cell(0, 7, _limpiar_texto_pdf(bloque["label"]), new_x="LMARGIN", new_y="NEXT")
+            pdf.set_font("Helvetica", "", 10)
+            for it in items_bloque:
+                linea = f"   - {it['ejercicio']}: {it['series_objetivo']} series x {it['reps_objetivo']} reps"
+                pdf.multi_cell(0, 6, _limpiar_texto_pdf(linea))
+        pdf.ln(3)
+
+    salida = pdf.output()
+    return bytes(salida) if not isinstance(salida, str) else salida.encode("latin-1")
 
 # ==========================================
 # 🛡️ INTERFAZ DE ENTRENAMIENTO (AISLADA)
@@ -978,6 +1031,15 @@ else:
                 if plan_actual:
                     st.success(f"**Rutina Activa:** {plan_actual[0]['nombre_rutina']}")
 
+                    pdf_bytes_r1 = generar_pdf_rutina(al_r, plan_actual)
+                    if pdf_bytes_r1:
+                        nombre_archivo_pdf_r1 = f"Rutina_{al_r.replace(' ', '_')}_{obtener_fecha_hora_actual().strftime('%Y%m%d')}.pdf"
+                        st.download_button(
+                            "📄 Descargar Rutina en PDF", data=pdf_bytes_r1,
+                            file_name=nombre_archivo_pdf_r1, mime="application/pdf",
+                            use_container_width=True
+                        )
+
                     for dia in DIAS_PLANIF:
                         items_dia = [it for it in plan_actual if desarmar_clave_bloque(it["bloque"])[0] == dia["id"]]
                         if items_dia:
@@ -1348,6 +1410,16 @@ else:
                             
                             if plan_atleta:
                                 st.markdown(f"💪 **Rutina Asignada:** `{plan_atleta[0]['nombre_rutina']}`")
+
+                                pdf_bytes_r2 = generar_pdf_rutina(a['nombre_apellido'], plan_atleta)
+                                if pdf_bytes_r2:
+                                    nombre_archivo_pdf_r2 = f"Rutina_{a['nombre_apellido'].replace(' ', '_')}_{obtener_fecha_hora_actual().strftime('%Y%m%d')}.pdf"
+                                    st.download_button(
+                                        "📄 Descargar Rutina en PDF", data=pdf_bytes_r2,
+                                        file_name=nombre_archivo_pdf_r2, mime="application/pdf",
+                                        use_container_width=True, key=f"pdf_{a['id']}"
+                                    )
+
                                 for dia in DIAS_PLANIF:
                                     items_dia = [it for it in plan_atleta if desarmar_clave_bloque(it["bloque"])[0] == dia["id"]]
                                     if items_dia:
