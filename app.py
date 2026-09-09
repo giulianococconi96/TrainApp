@@ -306,7 +306,8 @@ def generar_pdf_rutina(nombre_atleta, plan_items):
             pdf.cell(0, 7, _limpiar_texto_pdf(bloque["label"]), new_x="LMARGIN", new_y="NEXT")
             pdf.set_font("Helvetica", "", 10)
             for it in items_bloque:
-                linea = f"   - {it['ejercicio']}: {it['series_objetivo']} series x {it['reps_objetivo']} reps"
+                peso_obj_pdf = f" @ {it.get('peso_objetivo')}kg" if it.get("peso_objetivo") else ""
+                linea = f"   - {it['ejercicio']}: {it['series_objetivo']} series x {it['reps_objetivo']} reps{peso_obj_pdf}"
                 pdf.multi_cell(0, 6, _limpiar_texto_pdf(linea), new_x="LMARGIN", new_y="NEXT")
         pdf.ln(3)
 
@@ -399,11 +400,14 @@ def renderizar_tabla_entrenamiento(alumno_id, nombre_atleta, es_espejo=False):
                 nombre_ej = ej["ejercicio"]
                 series_obj = int(ej["series_objetivo"])
                 reps_obj = ej["reps_objetivo"]
+                peso_obj = ej.get("peso_objetivo")
                 link_video = ej.get("link_video") or videos_por_nombre.get(str(nombre_ej).strip().casefold(), "")
 
                 with st.container(border=True):
                     col1, col2 = st.columns([3, 1])
-                    with col1: st.markdown(f"🏋️‍♂️ **{nombre_ej}** (`{series_obj}S x {reps_obj}R`)")
+                    with col1:
+                        texto_peso_obj = f" @ {peso_obj}kg" if peso_obj else ""
+                        st.markdown(f"🏋️‍♂️ **{nombre_ej}** (`{series_obj}S x {reps_obj}R{texto_peso_obj}`)")
                     with col2:
                         link_video_limpio = str(link_video).strip() if link_video else ""
                         if link_video_limpio and link_video_limpio.lower().startswith("http"):
@@ -425,7 +429,7 @@ def renderizar_tabla_entrenamiento(alumno_id, nombre_atleta, es_espejo=False):
                             with cols[s-1]:
                                 st.markdown(f"<p style='text-align: center; color: {COLOR_PRIMARIO};'>S{s}</p>", unsafe_allow_html=True)
                                 draft_serie = borrador_items.get((bloque["id"], nombre_ej, s), {})
-                                default_kg = float(draft_serie.get("kilos", 0.0) or 0.0)
+                                default_kg = float(draft_serie.get("kilos") if draft_serie.get("kilos") is not None else (peso_obj or 0.0))
                                 default_reps = int(draft_serie.get("reps_reales") or (int(reps_obj) if str(reps_obj).isdigit() else 5))
                                 k = st.number_input("kg", key=f"k_{sufijo}_{idx}_{s}", label_visibility="collapsed", step=0.5, value=default_kg)
                                 r = st.number_input("R", key=f"r_{sufijo}_{idx}_{s}", label_visibility="collapsed", value=default_reps)
@@ -1002,7 +1006,7 @@ else:
         list_al = [a["nombre_apellido"] for a in lista_alumnos_datos]
         list_al_n = ["- Seleccionar -"] + list_al
 
-        ta0, ta1, ta2, ta3, ta4, ta5 = st.tabs(["🏠 Resumen General", "📊 Historial y Carga", "📝 Planificar", "👥 Atletas", "✅ Aprobaciones", "📚 Biblioteca"])
+        ta0, ta1, ta2, ta3, ta4, ta5, ta6 = st.tabs(["🏠 Resumen General", "📊 Historial y Carga", "📝 Planificar", "🧭 Periodización", "👥 Atletas", "✅ Aprobaciones", "📚 Biblioteca"])
 
         with ta0:
             st.markdown("### 🏠 Dashboard General")
@@ -1398,6 +1402,227 @@ else:
                                 st.rerun()
 
         with ta3:
+            st.markdown("### 🧭 Periodización")
+            st.caption("Organizá el entrenamiento de cada atleta en bloques (mesociclos) de varias semanas (microciclos). Por ahora es solo la estructura — todavía no reemplaza la planificación semana a semana de '📝 Planificar'.")
+
+            al_pz = st.selectbox("Atleta:", list_al_n, key="sb_periodizacion_atleta")
+            if al_pz != "- Seleccionar -":
+                id_pz = id_por_nombre[al_pz]
+
+                with st.expander("➕ Crear nuevo Mesociclo"):
+                    with st.form("form_nuevo_mesociclo"):
+                        nombre_meso = st.text_input("Nombre del Mesociclo:", placeholder="Ej: Bloque de Fuerza - Pretemporada")
+                        objetivo_meso = st.selectbox("Objetivo principal:", ["Fuerza", "Hipertrofia", "Potencia", "Resistencia", "Descarga", "General"])
+                        col_meso1, col_meso2 = st.columns(2)
+                        with col_meso1:
+                            fecha_inicio_meso = st.date_input("Fecha de inicio:", value=obtener_fecha_hora_actual().date())
+                        with col_meso2:
+                            semanas_meso = st.number_input("Cantidad de semanas:", min_value=1, max_value=20, value=4)
+                        ultima_es_descarga = st.checkbox("La última semana es de descarga")
+
+                        if st.form_submit_button("💾 Crear Mesociclo", use_container_width=True, type="primary"):
+                            if not nombre_meso.strip():
+                                st.error("❌ Ponele un nombre al mesociclo.")
+                            else:
+                                res_meso = ejecutar_seguro(
+                                    supabase.table("mesociclos").insert({
+                                        "alumno_id": id_pz, "nombre": nombre_meso.strip(), "objetivo": objetivo_meso,
+                                        "fecha_inicio": fecha_inicio_meso.strftime("%Y-%m-%d"), "semanas_totales": semanas_meso
+                                    }),
+                                    "No se pudo crear el mesociclo."
+                                )
+                                if res_meso and res_meso.data:
+                                    meso_id_nuevo = res_meso.data[0]["id"]
+                                    filas_microciclos = []
+                                    for n in range(1, semanas_meso + 1):
+                                        if ultima_es_descarga and n == semanas_meso:
+                                            etiqueta_semana = "Semana de Descarga"
+                                        else:
+                                            etiqueta_semana = f"Semana {n}"
+                                        filas_microciclos.append({"mesociclo_id": meso_id_nuevo, "numero_semana": n, "etiqueta": etiqueta_semana})
+                                    ejecutar_seguro(supabase.table("microciclos").insert(filas_microciclos), "El mesociclo se creó, pero hubo un problema generando las semanas.")
+                                    st.success(f"✅ Mesociclo '{nombre_meso.strip()}' creado con {semanas_meso} semanas.")
+                                    time.sleep(1)
+                                    st.rerun()
+
+                st.markdown("#### 📚 Mesociclos de este atleta")
+                res_mesos = ejecutar_seguro(supabase.table("mesociclos").select("*").eq("alumno_id", id_pz).order("fecha_inicio", desc=True))
+                lista_mesos = res_mesos.data if res_mesos else []
+
+                if not lista_mesos:
+                    st.info(f"{al_pz} todavía no tiene ningún mesociclo creado.")
+                else:
+                    for meso in lista_mesos:
+                        estado_meso = "🟢 Activo" if meso.get("activo") else "⚪ Archivado"
+                        with st.expander(f"{estado_meso} · {meso['nombre']} — {meso.get('objetivo', '')} ({meso['semanas_totales']} semanas, desde {meso.get('fecha_inicio', 'sin fecha')})"):
+                            res_micros = ejecutar_seguro(supabase.table("microciclos").select("*").eq("mesociclo_id", meso["id"]).order("numero_semana"))
+                            lista_micros = res_micros.data if res_micros else []
+
+                            for micro in lista_micros:
+                                col_mc1, col_mc2 = st.columns([4, 1])
+                                with col_mc1:
+                                    st.write(f"**Semana {micro['numero_semana']}** — {micro.get('etiqueta', '')}")
+                                with col_mc2:
+                                    nueva_etiqueta = st.text_input("Etiqueta", value=micro.get("etiqueta", ""), key=f"etq_{micro['id']}", label_visibility="collapsed")
+                                    if nueva_etiqueta != micro.get("etiqueta", ""):
+                                        ejecutar_seguro(supabase.table("microciclos").update({"etiqueta": nueva_etiqueta}).eq("id", micro["id"]))
+
+                            st.divider()
+
+                            sub_meso_plantilla, sub_meso_prog = st.tabs(["🏋️ Plantilla de Ejercicios", "📈 Progresión Semanal"])
+
+                            # --- PLANTILLA: se carga una sola vez para todo el mesociclo ---
+                            with sub_meso_plantilla:
+                                st.caption("Estos ejercicios se repiten todas las semanas del bloque. Series quedan fijas; reps y peso del Bloque Principal se ajustan por semana en la otra pestaña.")
+                                res_plantilla = ejecutar_seguro(supabase.table("mesociclo_ejercicios").select("*").eq("mesociclo_id", meso["id"]).order("orden"))
+                                plantilla_actual = res_plantilla.data if res_plantilla else []
+
+                                if plantilla_actual:
+                                    for dia in DIAS_PLANIF:
+                                        items_dia_p = [it for it in plantilla_actual if desarmar_clave_bloque(it["bloque"])[0] == dia["id"]]
+                                        if items_dia_p:
+                                            st.markdown(f"**{dia['label']}**")
+                                            for it_p in items_dia_p:
+                                                col_pl1, col_pl2 = st.columns([5, 1])
+                                                with col_pl1:
+                                                    bloque_lbl_p = label_bloque(desarmar_clave_bloque(it_p["bloque"])[1])
+                                                    st.caption(f"{bloque_lbl_p} · {it_p['ejercicio']} ({it_p['series_objetivo']} series, base: {it_p.get('reps_objetivo_default','')})")
+                                                with col_pl2:
+                                                    if st.button("🗑️", key=f"del_plantilla_{it_p['id']}", use_container_width=True):
+                                                        ejecutar_seguro(supabase.table("mesociclo_ejercicios").delete().eq("id", it_p["id"]))
+                                                        st.rerun()
+
+                                with st.form(f"form_agregar_plantilla_{meso['id']}"):
+                                    st.markdown("**➕ Agregar ejercicio a la plantilla**")
+                                    col_p1, col_p2 = st.columns(2)
+                                    with col_p1: dia_p_sel = st.selectbox("Día:", [d["id"] for d in DIAS_PLANIF], format_func=label_dia, key=f"dia_p_{meso['id']}")
+                                    with col_p2: bloque_p_sel = st.selectbox("Bloque:", [b["id"] for b in SUB_BLOQUES], format_func=label_bloque, key=f"bloque_p_{meso['id']}")
+
+                                    res_bib_p = ejecutar_seguro(supabase.table("biblioteca_ejercicios").select("id, nombre, link_video").order("nombre"))
+                                    filas_bib_p = res_bib_p.data if res_bib_p else []
+                                    opciones_ej_p = [f["nombre"] for f in filas_bib_p] if filas_bib_p else []
+                                    ej_p_sel = st.selectbox("Ejercicio (de la Biblioteca):", opciones_ej_p, key=f"ej_p_{meso['id']}") if opciones_ej_p else st.text_input("Ejercicio (escribilo a mano):", key=f"ej_p_txt_{meso['id']}")
+
+                                    col_p3, col_p4 = st.columns(2)
+                                    with col_p3: series_p = st.number_input("Series (fijas todo el bloque):", min_value=1, max_value=10, value=4, key=f"series_p_{meso['id']}")
+                                    with col_p4: reps_base_p = st.text_input("Reps base (referencia):", "10", key=f"reps_p_{meso['id']}")
+
+                                    if st.form_submit_button("➕ Agregar a la Plantilla", use_container_width=True):
+                                        ej_id_p = next((f["id"] for f in filas_bib_p if f["nombre"] == ej_p_sel), None) if opciones_ej_p else None
+                                        link_p = next((f.get("link_video") for f in filas_bib_p if f["nombre"] == ej_p_sel), "") if opciones_ej_p else ""
+                                        ejecutar_seguro(supabase.table("mesociclo_ejercicios").insert({
+                                            "mesociclo_id": meso["id"], "bloque": armar_clave_bloque(dia_p_sel, bloque_p_sel),
+                                            "ejercicio": ej_p_sel, "ejercicio_id": ej_id_p,
+                                            "orden": len(plantilla_actual), "series_objetivo": series_p,
+                                            "reps_objetivo_default": reps_base_p, "link_video": link_p
+                                        }), "No se pudo agregar el ejercicio a la plantilla.")
+                                        st.rerun()
+
+                            # --- PROGRESIÓN SEMANAL: reps y peso del Bloque Principal, por semana ---
+                            with sub_meso_prog:
+                                if not plantilla_actual:
+                                    st.info("Primero cargá la plantilla de ejercicios en la otra pestaña.")
+                                else:
+                                    items_principal = [it for it in plantilla_actual if desarmar_clave_bloque(it["bloque"])[1] == "principal"]
+                                    if not items_principal:
+                                        st.info("La plantilla todavía no tiene ejercicios en el Bloque Principal (son los únicos con progresión de peso).")
+                                    else:
+                                        opciones_semana = {f"Semana {m['numero_semana']} — {m.get('etiqueta','')}": m for m in lista_micros}
+                                        semana_sel_label = st.selectbox("Semana a editar:", list(opciones_semana.keys()), key=f"sel_semana_{meso['id']}")
+                                        micro_sel = opciones_semana[semana_sel_label]
+
+                                        res_prog_semana = ejecutar_seguro(supabase.table("progresion_semanal").select("*").eq("microciclo_id", micro_sel["id"]))
+                                        prog_por_ejercicio = {p["mesociclo_ejercicio_id"]: p for p in (res_prog_semana.data if res_prog_semana else [])}
+
+                                        # Traemos la última carga REAL que el atleta registró en cada ejercicio,
+                                        # para que Giuliano decida la progresión en base a lo que pasó, no a ciegas.
+                                        nombres_ej_principal = [it["ejercicio"] for it in items_principal]
+                                        res_hist_reciente = ejecutar_seguro(
+                                            supabase.table("registros_entrenamiento").select("ejercicio, kilos, reps_reales, fecha")
+                                            .eq("alumno_id", id_pz).in_("ejercicio", nombres_ej_principal).order("fecha", desc=True)
+                                        )
+                                        ultimo_por_ejercicio = {}
+                                        for fila_h in (res_hist_reciente.data if res_hist_reciente else []):
+                                            nom_h = fila_h["ejercicio"]
+                                            if nom_h not in ultimo_por_ejercicio:
+                                                ultimo_por_ejercicio[nom_h] = {"fecha": fila_h["fecha"], "mejor_kg": fila_h["kilos"], "reps": fila_h["reps_reales"]}
+                                            elif fila_h["fecha"] == ultimo_por_ejercicio[nom_h]["fecha"] and fila_h["kilos"] > ultimo_por_ejercicio[nom_h]["mejor_kg"]:
+                                                ultimo_por_ejercicio[nom_h]["mejor_kg"] = fila_h["kilos"]
+                                                ultimo_por_ejercicio[nom_h]["reps"] = fila_h["reps_reales"]
+
+                                        with st.form(f"form_progresion_{meso['id']}_{micro_sel['id']}"):
+                                            valores_form = {}
+                                            for it_pr in items_principal:
+                                                prog_existente = prog_por_ejercicio.get(it_pr["id"], {})
+                                                st.markdown(f"**{it_pr['ejercicio']}**")
+                                                ref_ej = ultimo_por_ejercicio.get(it_pr["ejercicio"])
+                                                if ref_ej:
+                                                    fecha_ref_corta = str(ref_ej["fecha"]).split(" ")[0]
+                                                    st.caption(f"📊 Última carga registrada: **{ref_ej['mejor_kg']}kg x {ref_ej['reps']} reps** ({fecha_ref_corta})")
+                                                else:
+                                                    st.caption("📊 Todavía no hay cargas registradas para este ejercicio.")
+                                                col_pr1, col_pr2 = st.columns(2)
+                                                with col_pr1:
+                                                    reps_val = st.text_input("Reps:", value=prog_existente.get("reps_objetivo") or it_pr.get("reps_objetivo_default", ""), key=f"reps_prog_{it_pr['id']}_{micro_sel['id']}")
+                                                with col_pr2:
+                                                    peso_val = st.number_input("Peso objetivo (kg):", min_value=0.0, step=2.5, value=float(prog_existente.get("peso_objetivo") or 0.0), key=f"peso_prog_{it_pr['id']}_{micro_sel['id']}")
+                                                valores_form[it_pr["id"]] = (reps_val, peso_val)
+
+                                            if st.form_submit_button("💾 Guardar Progresión de esta Semana", use_container_width=True, type="primary"):
+                                                for meso_ej_id, (reps_v, peso_v) in valores_form.items():
+                                                    ejecutar_seguro(
+                                                        supabase.table("progresion_semanal").upsert({
+                                                            "microciclo_id": micro_sel["id"], "mesociclo_ejercicio_id": meso_ej_id,
+                                                            "reps_objetivo": reps_v, "peso_objetivo": peso_v
+                                                        }, on_conflict="microciclo_id,mesociclo_ejercicio_id")
+                                                    )
+                                                st.success(f"✅ Progresión de {semana_sel_label} guardada.")
+                                                st.rerun()
+
+                                        st.divider()
+                                        if st.button(f"🚀 Activar {semana_sel_label} como Rutina Activa", key=f"activar_{micro_sel['id']}", use_container_width=True, type="primary"):
+                                            res_prog_activar = ejecutar_seguro(supabase.table("progresion_semanal").select("*").eq("microciclo_id", micro_sel["id"]))
+                                            prog_activar = {p["mesociclo_ejercicio_id"]: p for p in (res_prog_activar.data if res_prog_activar else [])}
+
+                                            ejecutar_seguro(supabase.table("rutinas_asignadas").update({"activo": False}).eq("alumno_id", id_pz).eq("activo", True))
+
+                                            etiqueta_final_semana = micro_sel.get("etiqueta") or f"Semana {micro_sel['numero_semana']}"
+                                            filas_activar = []
+                                            for it_act in plantilla_actual:
+                                                es_principal = desarmar_clave_bloque(it_act["bloque"])[1] == "principal"
+                                                prog_item = prog_activar.get(it_act["id"], {})
+                                                reps_final = prog_item.get("reps_objetivo") or it_act.get("reps_objetivo_default", "10") if es_principal else it_act.get("reps_objetivo_default", "10")
+                                                peso_final = prog_item.get("peso_objetivo") if es_principal else None
+                                                filas_activar.append({
+                                                    "alumno_id": id_pz, "nombre_rutina": f"{meso['nombre']} - {etiqueta_final_semana}",
+                                                    "ejercicio": it_act["ejercicio"], "ejercicio_id": it_act.get("ejercicio_id"),
+                                                    "bloque": it_act["bloque"], "series_objetivo": it_act["series_objetivo"],
+                                                    "reps_objetivo": reps_final, "peso_objetivo": peso_final,
+                                                    "link_video": it_act.get("link_video"), "activo": True,
+                                                    "microciclo_id": micro_sel["id"]
+                                                })
+
+                                            res_act_final = ejecutar_seguro(supabase.table("rutinas_asignadas").insert(filas_activar), "No se pudo activar la semana.")
+                                            if res_act_final:
+                                                ejecutar_seguro(supabase.table("notificaciones").insert({
+                                                    "destinatario_tipo": "atleta", "destinatario_id": id_pz,
+                                                    "mensaje": f"🏋️‍♂️ El Profe Giuliano activó tu planificación: {semana_sel_label}."
+                                                }))
+                                                st.success(f"🎉 {semana_sel_label} activada como rutina actual de {al_pz}.")
+                                                time.sleep(1)
+                                                st.rerun()
+
+                            st.divider()
+                            if meso.get("activo"):
+                                if st.button("📦 Archivar este Mesociclo", key=f"archivar_meso_{meso['id']}", use_container_width=True):
+                                    ejecutar_seguro(supabase.table("mesociclos").update({"activo": False}).eq("id", meso["id"]))
+                                    st.rerun()
+                            else:
+                                if st.button("🔄 Reactivar este Mesociclo", key=f"reactivar_meso_{meso['id']}", use_container_width=True):
+                                    ejecutar_seguro(supabase.table("mesociclos").update({"activo": True}).eq("id", meso["id"]))
+                                    st.rerun()
+
+        with ta4:
             st.markdown("### 👥 Gestión y Fichas Técnicas de Atletas")
             ra = ejecutar_seguro(
                 supabase.table("alumnos").select("id, nombre_apellido, usuario, deporte, peso, altura, objetivo, foto_perfil, fecha_nacimiento").eq("estado", "aprobado").order("nombre_apellido")
@@ -1574,7 +1799,7 @@ else:
                                     time.sleep(1)
                                     st.rerun()
 
-        with ta4:
+        with ta5:
             st.markdown("### ✅ Aprobaciones de Nuevos Atletas")
             rp = ejecutar_seguro(supabase.table("alumnos").select("id, nombre_apellido, usuario").eq("estado", "pendiente"))
             datos_pendientes = rp.data if rp else []
@@ -1594,7 +1819,7 @@ else:
                                 time.sleep(1)
                                 st.rerun()
 
-        with ta5:
+        with ta6:
             st.markdown("### Biblioteca de Ejercicios")
             if st.button("Vaciar Biblioteca"):
                 res_vac = ejecutar_seguro(supabase.table("biblioteca_ejercicios").delete().neq("id", 0))
