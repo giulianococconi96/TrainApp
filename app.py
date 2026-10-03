@@ -307,7 +307,8 @@ def generar_pdf_rutina(nombre_atleta, plan_items):
             pdf.set_font("Helvetica", "", 10)
             for it in items_bloque:
                 peso_obj_pdf = f" @ {it.get('peso_objetivo')}kg" if it.get("peso_objetivo") else ""
-                linea = f"   - {it['ejercicio']}: {it['series_objetivo']} series x {it['reps_objetivo']} reps{peso_obj_pdf}"
+                rpe_obj_pdf = f" (RPE obj. {it.get('rpe_objetivo')})" if it.get("rpe_objetivo") else ""
+                linea = f"   - {it['ejercicio']}: {it['series_objetivo']} series x {it['reps_objetivo']} reps{peso_obj_pdf}{rpe_obj_pdf}"
                 pdf.multi_cell(0, 6, _limpiar_texto_pdf(linea), new_x="LMARGIN", new_y="NEXT")
         pdf.ln(3)
 
@@ -401,13 +402,15 @@ def renderizar_tabla_entrenamiento(alumno_id, nombre_atleta, es_espejo=False):
                 series_obj = int(ej["series_objetivo"])
                 reps_obj = ej["reps_objetivo"]
                 peso_obj = ej.get("peso_objetivo")
+                rpe_obj = ej.get("rpe_objetivo")
                 link_video = ej.get("link_video") or videos_por_nombre.get(str(nombre_ej).strip().casefold(), "")
 
                 with st.container(border=True):
                     col1, col2 = st.columns([3, 1])
                     with col1:
                         texto_peso_obj = f" @ {peso_obj}kg" if peso_obj else ""
-                        st.markdown(f"🏋️‍♂️ **{nombre_ej}** (`{series_obj}S x {reps_obj}R{texto_peso_obj}`)")
+                        texto_rpe_obj = f" · RPE obj. {rpe_obj}" if rpe_obj else ""
+                        st.markdown(f"🏋️‍♂️ **{nombre_ej}** (`{series_obj}S x {reps_obj}R{texto_peso_obj}{texto_rpe_obj}`)")
                     with col2:
                         link_video_limpio = str(link_video).strip() if link_video else ""
                         if link_video_limpio and link_video_limpio.lower().startswith("http"):
@@ -1473,9 +1476,28 @@ else:
 
                             # --- PLANTILLA: se carga una sola vez para todo el mesociclo ---
                             with sub_meso_plantilla:
-                                st.caption("Estos ejercicios se repiten todas las semanas del bloque. Series quedan fijas; reps y peso del Bloque Principal se ajustan por semana en la otra pestaña.")
+                                st.caption("Estos ejercicios se repiten todas las semanas del bloque. Series quedan fijas; reps, peso y RPE del Bloque Principal se ajustan por semana en la otra pestaña.")
                                 res_plantilla = ejecutar_seguro(supabase.table("mesociclo_ejercicios").select("*").eq("mesociclo_id", meso["id"]).order("orden"))
                                 plantilla_actual = res_plantilla.data if res_plantilla else []
+
+                                if not plantilla_actual:
+                                    if st.button("📥 Importar Rutina Activa como Plantilla", key=f"importar_rutina_{meso['id']}", use_container_width=True,
+                                                 help="Trae la rutina que ya armaste en '📝 Planificar' para este atleta, sin tener que volver a cargar los ejercicios a mano."):
+                                        res_rutina_activa_pz = ejecutar_seguro(supabase.table("rutinas_asignadas").select("*").eq("alumno_id", id_pz).eq("activo", True))
+                                        rutina_activa_pz = res_rutina_activa_pz.data if res_rutina_activa_pz else []
+                                        if not rutina_activa_pz:
+                                            st.warning(f"⚠️ {al_pz} no tiene ninguna rutina activa en '📝 Planificar' para importar. Armala ahí primero, o cargá la plantilla manualmente abajo.")
+                                        else:
+                                            filas_importar = [{
+                                                "mesociclo_id": meso["id"], "bloque": it_imp["bloque"],
+                                                "ejercicio": it_imp["ejercicio"], "ejercicio_id": it_imp.get("ejercicio_id"),
+                                                "orden": i_imp, "series_objetivo": it_imp["series_objetivo"],
+                                                "reps_objetivo_default": it_imp["reps_objetivo"], "link_video": it_imp.get("link_video")
+                                            } for i_imp, it_imp in enumerate(rutina_activa_pz)]
+                                            ejecutar_seguro(supabase.table("mesociclo_ejercicios").insert(filas_importar), "No se pudo importar la rutina activa.")
+                                            st.success(f"✅ Se importaron {len(filas_importar)} ejercicios desde la rutina activa de {al_pz}.")
+                                            st.rerun()
+                                    st.caption("— o cargalos manualmente abajo, ejercicio por ejercicio —")
 
                                 if plantilla_actual:
                                     for dia in DIAS_PLANIF:
@@ -1561,19 +1583,25 @@ else:
                                                     st.caption(f"📊 Última carga registrada: **{ref_ej['mejor_kg']}kg x {ref_ej['reps']} reps** ({fecha_ref_corta})")
                                                 else:
                                                     st.caption("📊 Todavía no hay cargas registradas para este ejercicio.")
-                                                col_pr1, col_pr2 = st.columns(2)
+                                                col_pr1, col_pr2, col_pr3 = st.columns(3)
                                                 with col_pr1:
                                                     reps_val = st.text_input("Reps:", value=prog_existente.get("reps_objetivo") or it_pr.get("reps_objetivo_default", ""), key=f"reps_prog_{it_pr['id']}_{micro_sel['id']}")
                                                 with col_pr2:
                                                     peso_val = st.number_input("Peso objetivo (kg):", min_value=0.0, step=2.5, value=float(prog_existente.get("peso_objetivo") or 0.0), key=f"peso_prog_{it_pr['id']}_{micro_sel['id']}")
-                                                valores_form[it_pr["id"]] = (reps_val, peso_val)
+                                                with col_pr3:
+                                                    opciones_rpe_obj = ["Sin especificar"] + list(range(1, 11))
+                                                    rpe_existente = prog_existente.get("rpe_objetivo")
+                                                    idx_rpe_obj = opciones_rpe_obj.index(rpe_existente) if rpe_existente in opciones_rpe_obj else 0
+                                                    rpe_val_sel = st.selectbox("RPE objetivo:", opciones_rpe_obj, index=idx_rpe_obj, key=f"rpe_prog_{it_pr['id']}_{micro_sel['id']}")
+                                                valores_form[it_pr["id"]] = (reps_val, peso_val, rpe_val_sel)
 
                                             if st.form_submit_button("💾 Guardar Progresión de esta Semana", use_container_width=True, type="primary"):
-                                                for meso_ej_id, (reps_v, peso_v) in valores_form.items():
+                                                for meso_ej_id, (reps_v, peso_v, rpe_v) in valores_form.items():
                                                     ejecutar_seguro(
                                                         supabase.table("progresion_semanal").upsert({
                                                             "microciclo_id": micro_sel["id"], "mesociclo_ejercicio_id": meso_ej_id,
-                                                            "reps_objetivo": reps_v, "peso_objetivo": peso_v
+                                                            "reps_objetivo": reps_v, "peso_objetivo": peso_v,
+                                                            "rpe_objetivo": rpe_v if rpe_v != "Sin especificar" else None
                                                         }, on_conflict="microciclo_id,mesociclo_ejercicio_id")
                                                     )
                                                 st.success(f"✅ Progresión de {semana_sel_label} guardada.")
@@ -1593,11 +1621,12 @@ else:
                                                 prog_item = prog_activar.get(it_act["id"], {})
                                                 reps_final = prog_item.get("reps_objetivo") or it_act.get("reps_objetivo_default", "10") if es_principal else it_act.get("reps_objetivo_default", "10")
                                                 peso_final = prog_item.get("peso_objetivo") if es_principal else None
+                                                rpe_final = prog_item.get("rpe_objetivo") if es_principal else None
                                                 filas_activar.append({
                                                     "alumno_id": id_pz, "nombre_rutina": f"{meso['nombre']} - {etiqueta_final_semana}",
                                                     "ejercicio": it_act["ejercicio"], "ejercicio_id": it_act.get("ejercicio_id"),
                                                     "bloque": it_act["bloque"], "series_objetivo": it_act["series_objetivo"],
-                                                    "reps_objetivo": reps_final, "peso_objetivo": peso_final,
+                                                    "reps_objetivo": reps_final, "peso_objetivo": peso_final, "rpe_objetivo": rpe_final,
                                                     "link_video": it_act.get("link_video"), "activo": True,
                                                     "microciclo_id": micro_sel["id"]
                                                 })
