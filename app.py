@@ -1476,26 +1476,27 @@ else:
 
                             # --- PLANTILLA: se carga una sola vez para todo el mesociclo ---
                             with sub_meso_plantilla:
-                                st.caption("Estos ejercicios se repiten todas las semanas del bloque. Series quedan fijas; reps, peso y RPE del Bloque Principal se ajustan por semana en la otra pestaña.")
+                                st.caption("Solo se periodiza el Bloque Principal: estos ejercicios se repiten todas las semanas y las series quedan fijas; reps, peso y RPE se ajustan semana a semana en la otra pestaña. Entrada en Calor y Vuelta a la Calma siguen igual que en la rutina activa.")
                                 res_plantilla = ejecutar_seguro(supabase.table("mesociclo_ejercicios").select("*").eq("mesociclo_id", meso["id"]).order("orden"))
                                 plantilla_actual = res_plantilla.data if res_plantilla else []
 
                                 if not plantilla_actual:
                                     if st.button("📥 Importar Rutina Activa como Plantilla", key=f"importar_rutina_{meso['id']}", use_container_width=True,
-                                                 help="Trae la rutina que ya armaste en '📝 Planificar' para este atleta, sin tener que volver a cargar los ejercicios a mano."):
+                                                 help="Trae solo los ejercicios del Bloque Principal de la rutina que ya armaste en '📝 Planificar'. Entrada en Calor y Vuelta a la Calma no se periodizan: siguen tal cual estén en la rutina activa."):
                                         res_rutina_activa_pz = ejecutar_seguro(supabase.table("rutinas_asignadas").select("*").eq("alumno_id", id_pz).eq("activo", True))
                                         rutina_activa_pz = res_rutina_activa_pz.data if res_rutina_activa_pz else []
-                                        if not rutina_activa_pz:
-                                            st.warning(f"⚠️ {al_pz} no tiene ninguna rutina activa en '📝 Planificar' para importar. Armala ahí primero, o cargá la plantilla manualmente abajo.")
+                                        rutina_activa_pz_principal = [it_imp for it_imp in rutina_activa_pz if desarmar_clave_bloque(it_imp["bloque"])[1] == "principal"]
+                                        if not rutina_activa_pz_principal:
+                                            st.warning(f"⚠️ {al_pz} no tiene ejercicios de Bloque Principal en una rutina activa para importar. Armala en '📝 Planificar' primero, o cargalos manualmente abajo.")
                                         else:
                                             filas_importar = [{
                                                 "mesociclo_id": meso["id"], "bloque": it_imp["bloque"],
                                                 "ejercicio": it_imp["ejercicio"], "ejercicio_id": it_imp.get("ejercicio_id"),
                                                 "orden": i_imp, "series_objetivo": it_imp["series_objetivo"],
                                                 "reps_objetivo_default": it_imp["reps_objetivo"], "link_video": it_imp.get("link_video")
-                                            } for i_imp, it_imp in enumerate(rutina_activa_pz)]
+                                            } for i_imp, it_imp in enumerate(rutina_activa_pz_principal)]
                                             ejecutar_seguro(supabase.table("mesociclo_ejercicios").insert(filas_importar), "No se pudo importar la rutina activa.")
-                                            st.success(f"✅ Se importaron {len(filas_importar)} ejercicios desde la rutina activa de {al_pz}.")
+                                            st.success(f"✅ Se importaron {len(filas_importar)} ejercicios del Bloque Principal desde la rutina activa de {al_pz}.")
                                             st.rerun()
                                     st.caption("— o cargalos manualmente abajo, ejercicio por ejercicio —")
 
@@ -1515,10 +1516,9 @@ else:
                                                         st.rerun()
 
                                 with st.form(f"form_agregar_plantilla_{meso['id']}"):
-                                    st.markdown("**➕ Agregar ejercicio a la plantilla**")
-                                    col_p1, col_p2 = st.columns(2)
-                                    with col_p1: dia_p_sel = st.selectbox("Día:", [d["id"] for d in DIAS_PLANIF], format_func=label_dia, key=f"dia_p_{meso['id']}")
-                                    with col_p2: bloque_p_sel = st.selectbox("Bloque:", [b["id"] for b in SUB_BLOQUES], format_func=label_bloque, key=f"bloque_p_{meso['id']}")
+                                    st.markdown("**➕ Agregar ejercicio a la plantilla** (Bloque Principal)")
+                                    dia_p_sel = st.selectbox("Día:", [d["id"] for d in DIAS_PLANIF], format_func=label_dia, key=f"dia_p_{meso['id']}")
+                                    bloque_p_sel = "principal"
 
                                     res_bib_p = ejecutar_seguro(supabase.table("biblioteca_ejercicios").select("id, nombre, link_video").order("nombre"))
                                     filas_bib_p = res_bib_p.data if res_bib_p else []
@@ -1612,22 +1612,38 @@ else:
                                             res_prog_activar = ejecutar_seguro(supabase.table("progresion_semanal").select("*").eq("microciclo_id", micro_sel["id"]))
                                             prog_activar = {p["mesociclo_ejercicio_id"]: p for p in (res_prog_activar.data if res_prog_activar else [])}
 
+                                            # Entrada en Calor y Vuelta a la Calma no se periodizan: los conservamos
+                                            # tal cual están en la rutina activa actual, antes de archivarla.
+                                            res_activa_previa = ejecutar_seguro(supabase.table("rutinas_asignadas").select("*").eq("alumno_id", id_pz).eq("activo", True))
+                                            activa_previa = res_activa_previa.data if res_activa_previa else []
+                                            items_a_conservar = [it for it in activa_previa if desarmar_clave_bloque(it["bloque"])[1] != "principal"]
+
                                             ejecutar_seguro(supabase.table("rutinas_asignadas").update({"activo": False}).eq("alumno_id", id_pz).eq("activo", True))
 
                                             etiqueta_final_semana = micro_sel.get("etiqueta") or f"Semana {micro_sel['numero_semana']}"
+                                            nombre_rutina_nueva = f"{meso['nombre']} - {etiqueta_final_semana}"
                                             filas_activar = []
                                             for it_act in plantilla_actual:
-                                                es_principal = desarmar_clave_bloque(it_act["bloque"])[1] == "principal"
+                                                if desarmar_clave_bloque(it_act["bloque"])[1] != "principal":
+                                                    continue  # solo el Bloque Principal se periodiza
                                                 prog_item = prog_activar.get(it_act["id"], {})
-                                                reps_final = prog_item.get("reps_objetivo") or it_act.get("reps_objetivo_default", "10") if es_principal else it_act.get("reps_objetivo_default", "10")
-                                                peso_final = prog_item.get("peso_objetivo") if es_principal else None
-                                                rpe_final = prog_item.get("rpe_objetivo") if es_principal else None
                                                 filas_activar.append({
-                                                    "alumno_id": id_pz, "nombre_rutina": f"{meso['nombre']} - {etiqueta_final_semana}",
+                                                    "alumno_id": id_pz, "nombre_rutina": nombre_rutina_nueva,
                                                     "ejercicio": it_act["ejercicio"], "ejercicio_id": it_act.get("ejercicio_id"),
                                                     "bloque": it_act["bloque"], "series_objetivo": it_act["series_objetivo"],
-                                                    "reps_objetivo": reps_final, "peso_objetivo": peso_final, "rpe_objetivo": rpe_final,
+                                                    "reps_objetivo": prog_item.get("reps_objetivo") or it_act.get("reps_objetivo_default", "10"),
+                                                    "peso_objetivo": prog_item.get("peso_objetivo"), "rpe_objetivo": prog_item.get("rpe_objetivo"),
                                                     "link_video": it_act.get("link_video"), "activo": True,
+                                                    "microciclo_id": micro_sel["id"]
+                                                })
+
+                                            for it_cons in items_a_conservar:
+                                                filas_activar.append({
+                                                    "alumno_id": id_pz, "nombre_rutina": nombre_rutina_nueva,
+                                                    "ejercicio": it_cons["ejercicio"], "ejercicio_id": it_cons.get("ejercicio_id"),
+                                                    "bloque": it_cons["bloque"], "series_objetivo": it_cons["series_objetivo"],
+                                                    "reps_objetivo": it_cons["reps_objetivo"], "peso_objetivo": None, "rpe_objetivo": None,
+                                                    "link_video": it_cons.get("link_video"), "activo": True,
                                                     "microciclo_id": micro_sel["id"]
                                                 })
 
